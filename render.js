@@ -107,23 +107,18 @@ function settleDurationSec(sizes, stepMs, { capSec = 75, minSec = 3 } = {}) {
 // Probe the page to find when the animation stops changing (its true end).
 // Used only when no readable timeline (CSS/WAAPI/GSAP global) was found.
 // Bounded by capSec; falls back gracefully (returns 0 => caller uses default).
-async function detectDurationSec(page, { capSec = 75, stepMs = 250, stableWindowMs = 4000, minSec = 3 } = {}) {
+async function detectDurationSec(page, { capSec = 75, stepMs = 500, minSec = 3 } = {}) {
   try {
     const prevW = page.viewportSize();
     await page.setViewportSize({ width: 480, height: 270 }); // tiny = fast probe
     const steps = Math.floor((capSec * 1000) / stepMs);
     const sizes = [];
-    let stableMs = 0, lastChangeT = 0;
+    // Scan the FULL window (no early break): a mid-clip pause must never be
+    // mistaken for the end. settleDurationSec takes the last real change.
     for (let i = 0; i <= steps; i++) {
-      const t = i * stepMs;
-      await page.evaluate((tt) => { window.__framecast.tick(tt); window.__framecast.seekDeclarative(tt); }, t);
+      await page.evaluate((tt) => { window.__framecast.tick(tt); window.__framecast.seekDeclarative(tt); }, i * stepMs);
       const buf = await page.screenshot({ type: 'jpeg', quality: 50 });
       sizes.push(buf.length);
-      if (sizes.length > 1) {
-        if (isFrameChange(sizes[i], sizes[i - 1])) { lastChangeT = t; stableMs = 0; }
-        else stableMs += stepMs;
-      }
-      if (lastChangeT > 0 && stableMs >= stableWindowMs) break; // ended + held
     }
     if (prevW) await page.setViewportSize(prevW);
     return settleDurationSec(sizes, stepMs, { capSec, minSec });
@@ -225,16 +220,33 @@ async function render(opts) {
   let clockDirty = false;
   if (!durationSec || opts.autoDetect) {
     const info = await page.evaluate(() => {
+      // 1) Explicit author intent wins — the reliable path for held end cards.
+      //    Add EITHER to your HTML:
+      //      <script>window.FRAMECAST_DURATION = 60</script>
+      //      <meta name="framecast:duration" content="60">
+      let declaredMs = 0;
+      try {
+        if (typeof window.FRAMECAST_DURATION === 'number' && window.FRAMECAST_DURATION > 0) {
+          declaredMs = window.FRAMECAST_DURATION * 1000;
+        } else {
+          const m = document.querySelector('meta[name="framecast:duration"]');
+          const v = m && parseFloat(m.getAttribute('content'));
+          if (v > 0) declaredMs = v * 1000;
+        }
+      } catch (e) {}
+      // 2) Readable CSS/WAAPI timelines, and GSAP's global timeline if exposed.
       const css = window.__framecast.longestFiniteMs();
-      // GSAP exposes its own timeline; read its total duration if present.
       let gsapMs = 0;
       try {
         const g = window.gsap;
         if (g && g.globalTimeline) gsapMs = (g.globalTimeline.totalDuration() || 0) * 1000;
       } catch (e) {}
-      return { max: Math.max(css.max || 0, gsapMs), sawInfinite: css.sawInfinite };
+      return { declaredMs, max: Math.max(css.max || 0, gsapMs), sawInfinite: css.sawInfinite };
     });
-    if (opts.autoDetect && info.max > 0) {
+    // Declared duration is authoritative (covers intentional end-card holds).
+    if (info.declaredMs > 0) {
+      durationSec = Math.min(HARD_CAP_SEC, info.declaredMs / 1000);
+    } else if (opts.autoDetect && info.max > 0) {
       durationSec = Math.min(HARD_CAP_SEC, Math.ceil((info.max / 1000) + 0.5));
     }
     // No readable timeline (e.g. bundled GSAP)? Probe for when motion stops.
