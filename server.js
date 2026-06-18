@@ -108,9 +108,12 @@ const server = http.createServer((req, res) => {
       if (!o.html || typeof o.html !== 'string') return sendJSON(res, 400, { error: 'Missing html' });
       const params = cleanParams(o);
       const free = tierOpts('free');
-      const job = queue.add({ ...params, quality: free.quality, watermark: free.watermark, maxHeight: free.maxHeight });
+      // Free is always a short teaser: cap length regardless of what was requested.
+      const teaserSec = Math.min(params.durationSec || free.maxDurationSec, free.maxDurationSec);
+      const job = queue.add({ ...params, durationSec: teaserSec, autoDetect: false,
+        quality: free.quality, watermark: free.watermark, maxHeight: free.maxHeight });
       sources.set(job.id, { params, ts: Date.now() });
-      sendJSON(res, 200, { jobId: job.id, tier: 'free', price: PRICING.perVideoLabel });
+      sendJSON(res, 200, { jobId: job.id, tier: 'free', price: PRICING.perVideoLabel, teaserSec });
     });
   }
 

@@ -36,9 +36,10 @@ const PRESETS = {
 
 // Quality -> CRF (lower = higher quality / bigger file). Tuned per container.
 const QUALITY = {
-  high:     { crf: 16, preset: 'slow'   },
-  balanced: { crf: 19, preset: 'medium' },
-  small:    { crf: 23, preset: 'medium' },
+  high:     { crf: 16, preset: 'slow'     },
+  balanced: { crf: 19, preset: 'medium'   },
+  small:    { crf: 23, preset: 'medium'   },
+  preview:  { crf: 28, preset: 'veryfast' }, // free teaser: fastest encode, frees CPU
 };
 
 module.exports = { PRESETS, QUALITY };

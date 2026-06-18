@@ -4,14 +4,16 @@
 // subscription for power users.
 
 const TIERS = {
-  // Free: instant, but watermarked and capped at 720p. Cheap to render, which is
-  // the point — you only spend real compute on people who pay.
+  // Free: a fast 10-second watermarked TEASER at 540p with the fastest encode.
+  // Bounded no matter how long the upload is — keeps free-tier compute cheap and
+  // makes previews feel near-instant. Users pay to unlock the full, clean video.
   free: {
     label: 'Free preview',
     watermark: true,
-    maxHeight: 720,
-    quality: 'balanced',
+    maxHeight: 540,
+    quality: 'preview',
     allow4k: false,
+    maxDurationSec: 10,
   },
   // Paid (per-video OR subscription unlock): clean, full resolution, all formats.
   paid: {
@@ -33,7 +35,7 @@ const PRICING = {
 
 function tierOpts(tier) {
   const t = TIERS[tier] || TIERS.free;
-  return { watermark: t.watermark, maxHeight: t.maxHeight, quality: t.quality, allow4k: t.allow4k };
+  return { watermark: t.watermark, maxHeight: t.maxHeight, quality: t.quality, allow4k: t.allow4k, maxDurationSec: t.maxDurationSec };
 }
 
 module.exports = { TIERS, PRICING, tierOpts };

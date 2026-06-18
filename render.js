@@ -203,17 +203,21 @@ async function render(opts) {
       window.__framecast.tick(tt);
       window.__framecast.seekDeclarative(tt);
     }, t);
-    const png = await page.screenshot({
-      type: 'png',
-      omitBackground: transparent,
-      // IMPORTANT: keep 'allow'. 'disabled' makes Playwright reset infinite CSS
-      // animations to their initial state and fast-forward finite ones, which
-      // would clobber the precise currentTime we just seeked. We've already
-      // paused every animation, so 'allow' renders the exact frame we want.
+    // JPEG capture is ~2x faster than PNG (PNG compression is the slow link) and
+    // visually lossless into x264. Transparency needs PNG's alpha, so use PNG
+    // only for transparent output.
+    // IMPORTANT: keep animations:'allow'. 'disabled' makes Playwright reset
+    // infinite CSS animations to their initial state and fast-forward finite
+    // ones, clobbering the exact currentTime we just seeked.
+    const shot = transparent
+      ? { type: 'png', omitBackground: true }
+      : { type: 'jpeg', quality: 90 };
+    const frame = await page.screenshot({
+      ...shot,
       animations: 'allow',
       clip: { x: 0, y: 0, width, height },
     });
-    const ok = ffmpeg.stdin.write(png);
+    const ok = ffmpeg.stdin.write(frame);
     if (!ok) await new Promise((r) => ffmpeg.stdin.once('drain', r));
     if (i % Math.ceil(fps / 2) === 0 || i === totalFrames - 1) {
       onProgress({ frame: i + 1, total: totalFrames, pct: Math.round(((i + 1) / totalFrames) * 100) });

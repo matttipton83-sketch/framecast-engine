@@ -81,8 +81,8 @@
       <div class="status" id="status"></div>
       <video id="result" controls loop></video>
       <div id="freebox" style="display:none;margin-top:12px;background:#161c2e;border:1px solid var(--line);border-radius:12px;padding:14px">
-        <div style="font-weight:600;margin-bottom:4px">Free preview · watermark · 720p</div>
-        <div style="color:var(--muted);font-size:13px;margin-bottom:12px">Love it? Get the clean, full-resolution video — no watermark.</div>
+        <div style="font-weight:600;margin-bottom:4px">Free preview · first 10s · watermark</div>
+        <div style="color:var(--muted);font-size:13px;margin-bottom:12px">This is a 10-second teaser. Get your full-length, full-resolution video — no watermark.</div>
         <button class="export" id="unlock" style="margin-top:0">Download clean version — <span id="price">$2.99</span></button>
         <div class="hint">One-time payment · no subscription</div>
       </div>
@@ -147,7 +147,7 @@ $('#export').onclick=async()=>{
     if(!sub.ok)throw new Error((await sub.json()).error||'Submit failed');
     const j=await sub.json();lastJobId=j.jobId;if(j.price)$('#price').textContent=j.price;
     const st=await pollJob(lastJobId,'Capturing');
-    $('#status').textContent=`Free preview ready · ${st.width}×${st.height} · ${st.durationSec}s`+(state.dur===0?' — set Length above if your clip is longer':'');
+    $('#status').textContent=`${st.durationSec}s teaser ready · ${st.width}×${st.height} — unlock the full clip below`;
     showVideo(st);$('#freebox').style.display='block';
   }catch(err){$('#status').textContent='⚠ '+err.message;}
   $('#export').disabled=false;
