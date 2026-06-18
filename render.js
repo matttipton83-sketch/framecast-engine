@@ -78,6 +78,60 @@ function buildFfmpegArgs({ container, fps, width, height, quality, transparent, 
   throw new Error('Unknown container: ' + container);
 }
 
+// Decide the end index of an animation from a sequence of per-frame "signatures"
+// (here, JPEG byte sizes). Pure + testable. Returns the step index of the last
+// real change, or -1 if nothing ever changed meaningfully.
+// A real visual change shifts the JPEG size by well over this; an identical
+// (held) frame re-encodes to ~the same size. Kept small + mostly absolute so we
+// bias toward DETECTING change (over-capturing is safe; truncating is not).
+function isFrameChange(a, b) {
+  return Math.abs(a - b) > Math.max(120, b * 0.0015);
+}
+
+function lastChangeIndex(sizes) {
+  let last = -1;
+  for (let i = 1; i < sizes.length; i++) {
+    if (isFrameChange(sizes[i], sizes[i - 1])) last = i;
+  }
+  return last;
+}
+
+// Turn a sequence of frame signatures into a duration in seconds.
+// Returns 0 when nothing changed (caller falls back to its default).
+function settleDurationSec(sizes, stepMs, { capSec = 75, minSec = 3 } = {}) {
+  const li = lastChangeIndex(sizes);
+  if (li < 0) return 0;
+  return Math.min(capSec, Math.max(minSec, (li * stepMs) / 1000 + 0.5));
+}
+
+// Probe the page to find when the animation stops changing (its true end).
+// Used only when no readable timeline (CSS/WAAPI/GSAP global) was found.
+// Bounded by capSec; falls back gracefully (returns 0 => caller uses default).
+async function detectDurationSec(page, { capSec = 75, stepMs = 250, stableWindowMs = 4000, minSec = 3 } = {}) {
+  try {
+    const prevW = page.viewportSize();
+    await page.setViewportSize({ width: 480, height: 270 }); // tiny = fast probe
+    const steps = Math.floor((capSec * 1000) / stepMs);
+    const sizes = [];
+    let stableMs = 0, lastChangeT = 0;
+    for (let i = 0; i <= steps; i++) {
+      const t = i * stepMs;
+      await page.evaluate((tt) => { window.__framecast.tick(tt); window.__framecast.seekDeclarative(tt); }, t);
+      const buf = await page.screenshot({ type: 'jpeg', quality: 50 });
+      sizes.push(buf.length);
+      if (sizes.length > 1) {
+        if (isFrameChange(sizes[i], sizes[i - 1])) { lastChangeT = t; stableMs = 0; }
+        else stableMs += stepMs;
+      }
+      if (lastChangeT > 0 && stableMs >= stableWindowMs) break; // ended + held
+    }
+    if (prevW) await page.setViewportSize(prevW);
+    return settleDurationSec(sizes, stepMs, { capSec, minSec });
+  } catch (e) {
+    return 0; // any failure -> caller default
+  }
+}
+
 async function render(opts) {
   const {
     input,                         // path to .html (or http URL)
@@ -168,6 +222,7 @@ async function render(opts) {
 
   // Decide duration.
   let durationSec = opts.durationSec;
+  let clockDirty = false;
   if (!durationSec || opts.autoDetect) {
     const info = await page.evaluate(() => {
       const css = window.__framecast.longestFiniteMs();
@@ -182,9 +237,31 @@ async function render(opts) {
     if (opts.autoDetect && info.max > 0) {
       durationSec = Math.min(HARD_CAP_SEC, Math.ceil((info.max / 1000) + 0.5));
     }
+    // No readable timeline (e.g. bundled GSAP)? Probe for when motion stops.
+    if (opts.autoDetect && !durationSec) {
+      const probed = await detectDurationSec(page, { capSec: HARD_CAP_SEC });
+      if (probed > 0) durationSec = probed;
+      clockDirty = true; // the probe advanced the virtual clock + animation state
+    }
   }
   if (!durationSec) durationSec = 15;              // sensible default
   durationSec = Math.min(durationSec, HARD_CAP_SEC); // enforce 1:15 ceiling
+
+  // The probe ran the animation forward to find its end, leaving JS state (GSAP,
+  // canvas) at that time. Reload so the real render starts from a clean t=0.
+  if (clockDirty) {
+    try {
+      await page.goto(target, { waitUntil: 'domcontentloaded', timeout: 20000 });
+    } catch (e) {
+      try { await page.goto(target, { waitUntil: 'commit', timeout: 20000 }); } catch (_) {}
+    }
+    await Promise.race([
+      page.evaluate(() => (document.fonts && document.fonts.ready) || Promise.resolve()).catch(() => {}),
+      page.waitForTimeout(2500),
+    ]);
+    await page.setViewportSize({ width, height });
+    await page.waitForTimeout(120);
+  }
 
   const totalFrames = Math.round(durationSec * fps);
   const frameMs = 1000 / fps;
@@ -232,4 +309,4 @@ async function render(opts) {
   return { outPath, durationSec, totalFrames, fps, width, height, bytes: size };
 }
 
-module.exports = { render, PRESETS, QUALITY, HARD_CAP_SEC };
+module.exports = { render, PRESETS, QUALITY, HARD_CAP_SEC, lastChangeIndex, settleDurationSec };
