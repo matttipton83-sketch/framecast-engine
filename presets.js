@@ -4,17 +4,17 @@
 const PRESETS = {
   'youtube-1080': {
     label: 'YouTube / Landscape 1080p',
-    width: 1920, height: 1080, container: 'mp4', fps: 60,
+    width: 1920, height: 1080, container: 'mp4', fps: 30,
     description: '16:9 — the safe default for YouTube and most uploads.',
   },
   'youtube-4k': {
     label: 'YouTube / Landscape 4K',
-    width: 3840, height: 2160, container: 'mp4', fps: 60,
+    width: 3840, height: 2160, container: 'mp4', fps: 30,
     description: '16:9 ultra-high-res. Bigger files, crisp on large screens.',
   },
   'vertical-1080': {
     label: 'Vertical 9:16 (TikTok / Reels / Shorts)',
-    width: 1080, height: 1920, container: 'mp4', fps: 60,
+    width: 1080, height: 1920, container: 'mp4', fps: 30,
     description: 'Full-screen mobile — the gold standard for short-form video.',
   },
   'square-1080': {
@@ -24,7 +24,7 @@ const PRESETS = {
   },
   'webm-transparent': {
     label: 'Transparent WebM (overlays)',
-    width: 1920, height: 1080, container: 'webm', fps: 60, transparent: true,
+    width: 1920, height: 1080, container: 'webm', fps: 30, transparent: true,
     description: 'Alpha-channel video for compositing over other footage.',
   },
   'gif': {
