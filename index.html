@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Framecast</title>
+<style>
+  :root{--bg:#0b0e16;--panel:#121726;--panel2:#161c2e;--line:#222b42;--ink:#eef2fb;--muted:#93a0bd;--accent:#7c9bff;--accent2:#56e0c0;--grad:linear-gradient(120deg,#7c9bff,#9a7cff 45%,#56e0c0);--radius:16px}
+  *{box-sizing:border-box}html,body{margin:0;height:100%}
+  body{background:radial-gradient(1200px 700px at 70% -10%,#1a2342,transparent),var(--bg);background-color:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased;display:flex;flex-direction:column;min-height:100%}
+  header{display:flex;align-items:center;gap:12px;padding:20px 26px}
+  .logo{width:30px;height:30px;border-radius:9px;background:var(--grad);box-shadow:0 6px 18px rgba(124,155,255,.5)}
+  .brand{font-weight:700;letter-spacing:-.3px;font-size:18px}
+  .brand small{display:block;font-weight:500;color:var(--muted);font-size:11px;letter-spacing:.4px;text-transform:uppercase}
+  main{flex:1;display:grid;grid-template-columns:1.15fr .85fr;gap:22px;padding:6px 26px 26px;max-width:1100px;margin:0 auto;width:100%}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:20px}
+  h2{font-size:13px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin:0 0 14px}
+  .drop{border:1.5px dashed #2c3856;border-radius:14px;background:var(--panel2);min-height:210px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:10px;cursor:pointer;transition:.18s;padding:24px}
+  .drop:hover,.drop.drag{border-color:var(--accent);background:#18203a}
+  .drop .ico{width:54px;height:54px;border-radius:14px;background:var(--grad);display:grid;place-items:center;font-size:26px;color:#0b0e16;font-weight:800}
+  .drop .big{font-size:17px;font-weight:600}.drop .sub{color:var(--muted);font-size:13px;max-width:330px}
+  .loaded{display:none;align-items:center;gap:12px;justify-content:center}.loaded.show{display:flex}
+  .filechip{background:#1c2440;border:1px solid var(--line);border-radius:10px;padding:9px 13px;font-weight:600;max-width:70%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .link{color:var(--accent);cursor:pointer;font-size:13px}
+  iframe{width:100%;height:190px;border:1px solid var(--line);border-radius:12px;background:#000}
+  .formats{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .fmt{border:1px solid var(--line);border-radius:12px;padding:12px;cursor:pointer;background:var(--panel2);transition:.15s}
+  .fmt:hover{border-color:#39456b}.fmt.sel{border-color:var(--accent);box-shadow:0 0 0 2px rgba(124,155,255,.25) inset}
+  .fmt .name{font-weight:600;font-size:14px;margin-bottom:3px}.fmt .dim{color:var(--muted);font-size:12px}
+  .row{display:flex;align-items:center;justify-content:space-between;gap:14px;margin:18px 0 6px}
+  .row label{font-weight:600;font-size:14px}.val{color:var(--accent2);font-weight:700;font-variant-numeric:tabular-nums}
+  input[type=range]{width:100%;accent-color:var(--accent)}
+  .seg{display:flex;gap:6px;background:var(--panel2);padding:5px;border-radius:11px;border:1px solid var(--line)}
+  .seg button{flex:1;border:0;background:transparent;color:var(--muted);padding:8px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px}
+  .seg button.sel{background:var(--accent);color:#0b0e16}
+  .export{margin-top:18px;width:100%;border:0;border-radius:13px;padding:15px;font-size:16px;font-weight:700;color:#0b0e16;background:var(--grad);cursor:pointer;transition:.15s}
+  .export:hover{filter:brightness(1.06)}.export:disabled{opacity:.5;cursor:not-allowed;filter:none}
+  .hint{color:var(--muted);font-size:12px;text-align:center;margin-top:9px}
+  .bar{height:10px;background:var(--panel2);border:1px solid var(--line);border-radius:99px;overflow:hidden;display:none;margin-top:16px}.bar.show{display:block}
+  .bar i{display:block;height:100%;width:0;background:var(--grad);transition:width .25s}
+  .status{font-size:13px;color:var(--muted);margin-top:8px;min-height:18px}
+  video{width:100%;border-radius:12px;margin-top:14px;display:none;background:#000;border:1px solid var(--line)}video.show{display:block}
+  .ractions{display:none;gap:10px;margin-top:12px}.ractions.show{display:flex}
+  .btn2{flex:1;text-align:center;border:1px solid var(--line);background:var(--panel2);color:var(--ink);padding:11px;border-radius:11px;font-weight:600;cursor:pointer;text-decoration:none}
+  .btn2.primary{background:var(--accent);color:#0b0e16;border-color:var(--accent)}
+  footer{color:var(--muted);font-size:12px;text-align:center;padding:14px}
+  @media(max-width:880px){main{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+  <header><div class="logo"></div><div class="brand">Framecast<small>HTML animation → clean video</small></div></header>
+  <main>
+    <section class="card">
+      <h2>1 · Drop your animation</h2>
+      <div class="drop" id="drop">
+        <div id="empty" style="display:flex;flex-direction:column;align-items:center;gap:10px">
+          <div class="ico">↑</div><div class="big">Drop a Claude HTML file here</div>
+          <div class="sub">Or click to browse. CSS, canvas, GSAP, SVG — all supported.</div>
+        </div>
+        <div class="loaded" id="loaded"><span class="filechip" id="fname"></span><span class="link" id="clear">change</span></div>
+        <input type="file" id="file" accept=".html,.htm" hidden>
+      </div>
+      <h2 style="margin-top:22px">Preview</h2>
+      <iframe id="preview"></iframe>
+    </section>
+    <section class="card">
+      <h2>2 · Pick a format</h2>
+      <div class="formats" id="formats"></div>
+      <div class="row"><label>Length</label><span class="val" id="durval">Auto</span></div>
+      <input type="range" id="dur" min="0" max="75" value="0">
+      <div class="hint" style="text-align:left;margin-top:4px">0 = auto-trim to your animation · drag up to 1:15</div>
+      <div class="row"><label>Quality</label></div>
+      <div class="seg" id="quality">
+        <button data-q="high" class="sel">High</button>
+        <button data-q="balanced">Balanced</button>
+        <button data-q="small">Small file</button>
+      </div>
+      <button class="export" id="export" disabled>Export video</button>
+      <div class="hint" id="exhint">Drop a file to begin</div>
+      <div class="bar" id="bar"><i id="barfill"></i></div>
+      <div class="status" id="status"></div>
+      <video id="result" controls loop></video>
+      <div id="freebox" style="display:none;margin-top:12px;background:#161c2e;border:1px solid var(--line);border-radius:12px;padding:14px">
+        <div style="font-weight:600;margin-bottom:4px">Free preview · watermark · 720p</div>
+        <div style="color:var(--muted);font-size:13px;margin-bottom:12px">Love it? Get the clean, full-resolution video — no watermark.</div>
+        <button class="export" id="unlock" style="margin-top:0">Download clean version — <span id="price">$2.99</span></button>
+        <div class="hint">One-time payment · no subscription</div>
+      </div>
+      <div class="ractions" id="ractions"><a class="btn2 primary" id="download" download>Save clean video</a><span class="btn2" id="again">Make another</span></div>
+    </section>
+  </main>
+  <footer>Framecast · frame-perfect capture · no watermark</footer>
+<script>
+const FORMATS=[
+  {id:'auto',name:'Auto-detect',dim:'match the animation'},
+  {id:'youtube-1080',name:'YouTube 1080p',dim:'1920×1080 · 16:9'},
+  {id:'youtube-4k',name:'YouTube 4K',dim:'3840×2160 · 16:9'},
+  {id:'vertical-1080',name:'Vertical',dim:'1080×1920 · 9:16'},
+  {id:'square-1080',name:'Square',dim:'1080×1080 · 1:1'},
+  {id:'gif',name:'GIF',dim:'animated loop'},
+];
+let state={preset:'auto',quality:'high',dur:0,html:null,fname:null};
+const $=s=>document.querySelector(s);
+// API base: same origin by default (local). On Netlify, point at your render
+// service once — open the site with ?api=https://your-engine.onrender.com and it
+// remembers it. Clear with ?api=  (empty).
+(function(){const q=new URLSearchParams(location.search);if(q.has('api')){const v=q.get('api').replace(/\/$/,'');if(v)localStorage.setItem('fc_api',v);else localStorage.removeItem('fc_api');}})();
+const API=localStorage.getItem('fc_api')||'';
+const abs=u=>(!u?u:(/^https?:\/\//.test(u)?u:API+u));
+const fw=$('#formats');
+FORMATS.forEach((f,i)=>{const el=document.createElement('div');el.className='fmt'+(i===0?' sel':'');el.innerHTML=`<div class="name">${f.name}</div><div class="dim">${f.dim}</div>`;el.onclick=()=>{state.preset=f.id;document.querySelectorAll('.fmt').forEach(x=>x.classList.remove('sel'));el.classList.add('sel');};fw.appendChild(el);});
+$('#quality').querySelectorAll('button').forEach(b=>b.onclick=()=>{state.quality=b.dataset.q;$('#quality').querySelectorAll('button').forEach(x=>x.classList.remove('sel'));b.classList.add('sel');});
+$('#dur').oninput=e=>{state.dur=+e.target.value;$('#durval').textContent=state.dur===0?'Auto':state.dur+'s';};
+const drop=$('#drop'),fileInput=$('#file');
+drop.onclick=()=>fileInput.click();
+['dragover','dragenter'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add('drag');}));
+['dragleave','drop'].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove('drag');}));
+drop.addEventListener('drop',e=>{const f=e.dataTransfer.files[0];if(f)loadFile(f);});
+fileInput.onchange=e=>{const f=e.target.files[0];if(f)loadFile(f);};
+$('#clear').onclick=e=>{e.stopPropagation();reset();};
+$('#again').onclick=reset;
+function loadFile(f){const r=new FileReader();r.onload=()=>{state.html=r.result;state.fname=f.name.replace(/\.[^.]+$/,'');$('#fname').textContent=f.name;$('#empty').style.display='none';$('#loaded').classList.add('show');$('#preview').srcdoc=state.html;$('#export').disabled=false;$('#exhint').textContent='Ready — choose a format and export';};r.readAsText(f);}
+function reset(){state.html=null;$('#empty').style.display='flex';$('#loaded').classList.remove('show');$('#preview').srcdoc='';$('#export').disabled=true;$('#exhint').textContent='Drop a file to begin';$('#bar').classList.remove('show');$('#result').classList.remove('show');$('#ractions').classList.remove('show');$('#status').textContent='';}
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+let lastJobId=null;            // the free-preview job (used to checkout)
+
+// poll a job id to completion, updating the progress bar
+async function pollJob(id,verb){
+  while(true){
+    await sleep(700);
+    const st=await(await fetch(API+'/api/jobs/'+id)).json();
+    if(st.status==='queued'){$('#status').textContent='Queued'+(st.position>1?` (position ${st.position})`:'…');$('#barfill').style.width='6%';}
+    else if(st.status==='rendering'){$('#barfill').style.width=Math.max(8,st.pct||0)+'%';$('#status').textContent=st.total?`${verb} frame ${st.frame} of ${st.total} — every frame perfect.`:verb+'…';}
+    else if(st.status==='done'){$('#barfill').style.width='100%';return st;}
+    else if(st.status==='error'){throw new Error(st.error||'Render failed');}
+  }
+}
+function showVideo(st){const u=abs(st.url);const v=$('#result');v.src=u;v.classList.add('show');$('#download').href=u;$('#download').download=(state.fname||'video')+'.'+st.url.split('.').pop();}
+
+// Step 1: free preview
+$('#export').onclick=async()=>{
+  if(!state.html)return;
+  $('#export').disabled=true;$('#bar').classList.add('show');$('#barfill').style.width='4%';
+  $('#result').classList.remove('show');$('#ractions').classList.remove('show');$('#freebox').style.display='none';$('#status').textContent='Submitting…';
+  try{
+    const sub=await fetch(API+'/api/jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({html:state.html,name:state.fname,preset:state.preset,durationSec:state.dur||undefined})});
+    if(!sub.ok)throw new Error((await sub.json()).error||'Submit failed');
+    const j=await sub.json();lastJobId=j.jobId;if(j.price)$('#price').textContent=j.price;
+    const st=await pollJob(lastJobId,'Capturing');
+    $('#status').textContent=`Free preview ready · ${st.width}×${st.height}`;
+    showVideo(st);$('#freebox').style.display='block';
+  }catch(err){$('#status').textContent='⚠ '+err.message;}
+  $('#export').disabled=false;
+};
+
+// Step 2: pay to unlock the clean version
+$('#unlock').onclick=async()=>{
+  if(!lastJobId)return;
+  $('#unlock').disabled=true;$('#status').textContent='Opening checkout…';
+  try{
+    const r=await fetch(API+'/api/checkout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jobId:lastJobId,returnTo:location.origin})});
+    const d=await r.json();if(!r.ok)throw new Error(d.error||'Checkout failed');
+    window.location.href=abs(d.url);       // Stripe (or dev) checkout
+  }catch(err){$('#status').textContent='⚠ '+err.message;$('#unlock').disabled=false;}
+};
+
+// Step 3: returning from payment -> render & deliver the clean video
+(async()=>{
+  const q=new URLSearchParams(location.search);
+  const paidJob=q.get('paid');
+  if(!paidJob)return;
+  history.replaceState({},'',location.pathname);
+  $('#bar').classList.add('show');$('#barfill').style.width='8%';$('#status').textContent='Payment received — rendering your clean video…';
+  try{
+    const r=await fetch(API+'/api/unlock',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jobId:paidJob,session:q.get('session')})});
+    const d=await r.json();if(!r.ok)throw new Error(d.error||'Unlock failed');
+    const st=await pollJob(d.cleanJobId,'Rendering clean');
+    $('#status').textContent=`Clean export ready · ${st.width}×${st.height} · ${st.durationSec}s · ${(st.bytes/1e6).toFixed(1)} MB · no watermark`;
+    showVideo(st);$('#ractions').classList.add('show');$('#freebox').style.display='none';
+  }catch(err){$('#status').textContent='⚠ '+err.message;}
+})();
+</script>
+</body>
+</html>

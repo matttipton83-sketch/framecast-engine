@@ -1,0 +1,18 @@
+{
+  "name": "framecast-engine",
+  "version": "0.1.0",
+  "description": "Framecast render engine + API (deploy to Render).",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "check": "node --check server.js && node --check render.js && node --check queue.js && node --check tiers.js && node --check payments.js"
+  },
+  "dependencies": {
+    "playwright": "1.49.0",
+    "ffmpeg-static": "^5.2.0"
+  },
+  "optionalDependencies": {
+    "stripe": "^16.0.0"
+  },
+  "engines": { "node": ">=18" }
+}

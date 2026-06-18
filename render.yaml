@@ -1,0 +1,15 @@
+# Render blueprint — flat repo. New > Blueprint in Render, pick this repo.
+services:
+  - type: web
+    name: framecast-engine
+    runtime: docker
+    dockerfilePath: Dockerfile
+    plan: standard          # rendering needs real CPU
+    healthCheckPath: /healthz
+    envVars:
+      - key: FRAMECAST_CONCURRENCY
+        value: "1"
+      - key: FRAMECAST_CORS_ORIGIN
+        value: "https://framecast-studio.netlify.app"
+      - key: PORT
+        value: "8080"
