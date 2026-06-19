@@ -383,7 +383,7 @@ async function renderKit(opts) {
     let w = p.width, h = p.height;
     if (opts.maxHeight && h > opts.maxHeight) { const s = opts.maxHeight / h; h = opts.maxHeight; w = Math.round((w * s) / 2) * 2; }
     const outPath = path.join(dir, `${base}-kit-${id}.${p.container}`);
-    await runFfmpeg(reframeArgs({ masterPath: master.outPath, width: w, height: h, container: p.container, quality: opts.quality || 'high', watermark: !!opts.watermark, fps: master.fps }));
+    await runFfmpeg(reframeArgs({ masterPath: master.outPath, width: w, height: h, container: p.container, quality: opts.quality || 'high', watermark: !!opts.watermark, fps: master.fps, outPath }));
     formats.push({ preset: id, label: p.label, outPath, width: w, height: h, container: p.container, bytes: fs.statSync(outPath).size });
   }
   try { fs.unlinkSync(master.outPath); } catch (_) {}
