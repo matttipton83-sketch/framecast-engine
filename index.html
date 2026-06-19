@@ -153,6 +153,19 @@ $('#export').onclick=async()=>{
   $('#export').disabled=false;
 };
 
+// Shared: after payment is settled, render & deliver the clean full version.
+async function renderClean(jobId,session){
+  $('#freebox').style.display='none';$('#bar').classList.add('show');$('#barfill').style.width='8%';
+  $('#status').textContent='Payment received — rendering your clean video…';
+  try{
+    const r=await fetch(API+'/api/unlock',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jobId,session})});
+    const d=await r.json();if(!r.ok)throw new Error(d.error||'Unlock failed');
+    const st=await pollJob(d.cleanJobId,'Rendering clean');
+    $('#status').textContent=`Clean export ready · ${st.width}×${st.height} · ${st.durationSec}s · ${(st.bytes/1e6).toFixed(1)} MB · no watermark`;
+    showVideo(st);$('#ractions').classList.add('show');
+  }catch(err){$('#status').textContent='⚠ '+err.message;}
+}
+
 // Step 2: pay to unlock the clean version
 $('#unlock').onclick=async()=>{
   if(!lastJobId)return;
@@ -160,24 +173,18 @@ $('#unlock').onclick=async()=>{
   try{
     const r=await fetch(API+'/api/checkout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jobId:lastJobId,returnTo:location.origin})});
     const d=await r.json();if(!r.ok)throw new Error(d.error||'Checkout failed');
-    window.location.href=abs(d.url);       // Stripe (or dev) checkout
+    if(d.live){ window.location.href=abs(d.url); }   // real Stripe: hosted checkout, returns via ?paid
+    else { await renderClean(lastJobId,'dev'); }      // dev mode: no redirect, render inline
   }catch(err){$('#status').textContent='⚠ '+err.message;$('#unlock').disabled=false;}
 };
 
-// Step 3: returning from payment -> render & deliver the clean video
+// Step 3: returning from a real Stripe payment -> render & deliver
 (async()=>{
   const q=new URLSearchParams(location.search);
   const paidJob=q.get('paid');
   if(!paidJob)return;
   history.replaceState({},'',location.pathname);
-  $('#bar').classList.add('show');$('#barfill').style.width='8%';$('#status').textContent='Payment received — rendering your clean video…';
-  try{
-    const r=await fetch(API+'/api/unlock',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jobId:paidJob,session:q.get('session')})});
-    const d=await r.json();if(!r.ok)throw new Error(d.error||'Unlock failed');
-    const st=await pollJob(d.cleanJobId,'Rendering clean');
-    $('#status').textContent=`Clean export ready · ${st.width}×${st.height} · ${st.durationSec}s · ${(st.bytes/1e6).toFixed(1)} MB · no watermark`;
-    showVideo(st);$('#ractions').classList.add('show');$('#freebox').style.display='none';
-  }catch(err){$('#status').textContent='⚠ '+err.message;}
+  await renderClean(paidJob,q.get('session'));
 })();
 </script>
 </body>
