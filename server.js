@@ -95,6 +95,36 @@ function serveFile(res, file) {
     res.end(buf);
   });
 }
+
+// Serve a file WITH HTTP range support. Safari/iOS require 206 Partial Content
+// for <video> playback — without it the video silently refuses to play.
+function serveRanged(req, res, file) {
+  fs.stat(file, (err, st) => {
+    if (err || !st.isFile()) { res.writeHead(404); return res.end('not found'); }
+    cors(res);
+    const type = MIME[path.extname(file)] || 'application/octet-stream';
+    const range = req.headers.range;
+    if (range) {
+      const m = /bytes=(\d*)-(\d*)/.exec(range);
+      let start = m && m[1] ? parseInt(m[1], 10) : 0;
+      let end = m && m[2] ? parseInt(m[2], 10) : st.size - 1;
+      if (isNaN(start) || isNaN(end) || start > end || end >= st.size) {
+        res.writeHead(416, { 'Content-Range': `bytes */${st.size}` }); return res.end();
+      }
+      res.writeHead(206, {
+        'Content-Type': type,
+        'Content-Range': `bytes ${start}-${end}/${st.size}`,
+        'Accept-Ranges': 'bytes',
+        'Content-Length': end - start + 1,
+        'Cache-Control': 'public, max-age=3600',
+      });
+      fs.createReadStream(file, { start, end }).pipe(res);
+    } else {
+      res.writeHead(200, { 'Content-Type': type, 'Accept-Ranges': 'bytes', 'Content-Length': st.size, 'Cache-Control': 'public, max-age=3600' });
+      fs.createReadStream(file).pipe(res);
+    }
+  });
+}
 function readBody(req, cb) {
   let body = ''; let big = false;
   req.on('data', (c) => { body += c; if (body.length > MAX_HTML_BYTES) { big = true; req.destroy(); } });
@@ -179,7 +209,7 @@ const server = http.createServer((req, res) => {
     return sendJSON(res, 200, out);
   }
 
-  if (req.method === 'GET' && url.pathname.startsWith('/files/')) return serveFile(res, path.join(WORK, path.basename(url.pathname)));
+  if (req.method === 'GET' && url.pathname.startsWith('/files/')) return serveRanged(req, res, path.join(WORK, path.basename(url.pathname)));
   if (url.pathname === '/healthz') return sendJSON(res, 200, { ok: true, active: queue.active, payments: LIVE ? 'stripe' : 'dev' });
   // Flat layout: only ever serve the UI file (never expose source .js).
   return serveFile(res, path.join(PUBLIC, 'index.html'));
