@@ -339,4 +339,55 @@ async function render(opts) {
   return { outPath, durationSec, totalFrames, fps, width, height, bytes: size };
 }
 
-module.exports = { render, PRESETS, QUALITY, HARD_CAP_SEC, lastChangeIndex, settleDurationSec };
+// run ffmpeg with args, resolve on success.
+function runFfmpeg(args, bin) {
+  return new Promise((res, rej) => {
+    const p = spawn(bin || process.env.FRAMECAST_FFMPEG || 'ffmpeg', args, { stdio: ['ignore', 'inherit', 'inherit'] });
+    p.on('close', (c) => c === 0 ? res() : rej(new Error('ffmpeg exited ' + c)));
+    p.on('error', rej);
+  });
+}
+
+// Reframe a MASTER video into a target format. Same aspect = clean scale; a
+// different aspect = the master fitted inside, with a blurred-zoomed fill behind
+// (no ugly black bars). Optional watermark. This is the "smart reframe".
+function reframeArgs({ masterPath, width, height, container, quality, watermark, fps, outPath }) {
+  const q = QUALITY[quality] || QUALITY.high;
+  const wm = watermark ? watermarkFilter() : null;
+  const fit = `[0:v]split[bg][fg];[bg]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},gblur=sigma=22[bgb];[fg]scale=${width}:${height}:force_original_aspect_ratio=decrease[fgs];[bgb][fgs]overlay=(W-w)/2:(H-h)/2,setsar=1` + (wm ? `,${wm}` : '');
+  if (container === 'gif') {
+    return ['-y', '-i', masterPath, '-filter_complex', `${fit},split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=3`, '-r', String(Math.min(fps, 24)), outPath];
+  }
+  if (container === 'webm') {
+    return ['-y', '-i', masterPath, '-filter_complex', fit, '-r', String(fps), '-c:v', 'libvpx-vp9', '-pix_fmt', 'yuv420p', '-b:v', '0', '-crf', String(q.crf + 8), '-row-mt', '1', outPath];
+  }
+  return ['-y', '-i', masterPath, '-filter_complex', fit, '-r', String(fps), '-c:v', 'libx264', '-preset', q.preset, '-crf', String(q.crf), '-pix_fmt', 'yuv420p', '-movflags', '+faststart', outPath];
+}
+
+// One drop -> every platform. Capture the animation ONCE (the expensive part),
+// then reframe that master into each requested format. Returns one file per format.
+async function renderKit(opts) {
+  const kitPresets = opts.kitPresets || ['youtube-1080', 'vertical-1080', 'square-1080'];
+  // 1) master: clean, full-res, native aspect, full duration (the one capture)
+  const master = await render({
+    ...opts, preset: opts.preset || 'auto', autoFormat: (opts.preset || 'auto') === 'auto',
+    watermark: false, maxHeight: null, quality: opts.quality || 'high',
+  });
+  const dir = path.dirname(master.outPath);
+  const base = path.basename(master.outPath).replace(/\.[^.]+$/, '');
+  const formats = [];
+  // 2) reframe master -> each format (cheap, no re-capture)
+  for (const id of kitPresets) {
+    const p = PRESETS[id];
+    if (!p) continue;
+    let w = p.width, h = p.height;
+    if (opts.maxHeight && h > opts.maxHeight) { const s = opts.maxHeight / h; h = opts.maxHeight; w = Math.round((w * s) / 2) * 2; }
+    const outPath = path.join(dir, `${base}-kit-${id}.${p.container}`);
+    await runFfmpeg(reframeArgs({ masterPath: master.outPath, width: w, height: h, container: p.container, quality: opts.quality || 'high', watermark: !!opts.watermark, fps: master.fps }));
+    formats.push({ preset: id, label: p.label, outPath, width: w, height: h, container: p.container, bytes: fs.statSync(outPath).size });
+  }
+  try { fs.unlinkSync(master.outPath); } catch (_) {}
+  return { durationSec: master.durationSec, fps: master.fps, formats };
+}
+
+module.exports = { render, renderKit, PRESETS, QUALITY, HARD_CAP_SEC, lastChangeIndex, settleDurationSec };

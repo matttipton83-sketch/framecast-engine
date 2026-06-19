@@ -14,7 +14,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { render } = require('./render');
+const { render, renderKit } = require('./render');
 const { JobQueue } = require('./queue');
 const { tierOpts, PRICING } = require('./tiers');
 const { createCheckout, verifyPaid, LIVE } = require('./payments');
@@ -76,7 +76,30 @@ function runRender(job, onProgress) {
   });
 }
 
-const queue = new JobQueue({ concurrency: CONCURRENCY, processor: runRender });
+// Paid unlock -> the full content kit: one capture, reframed into every format.
+function runKit(job, onProgress) {
+  const { html, preset, quality, durationSec } = job.payload;
+  const htmlPath = path.join(WORK, `in-${job.id}.html`);
+  fs.writeFileSync(htmlPath, html);
+  return renderKit({
+    input: htmlPath, preset: preset || 'auto', autoFormat: (preset || 'auto') === 'auto',
+    quality: quality || 'high', durationSec: durationSec || undefined, autoDetect: !durationSec,
+    watermark: false, maxHeight: null, outDir: WORK, onProgress,
+  }).then((r) => {
+    try { fs.unlinkSync(htmlPath); } catch (_) {}
+    const cleanups = [];
+    const kit = r.formats.map((f) => {
+      const ext = path.extname(f.outPath).slice(1);
+      const finalName = `${job.id}-${f.preset}.${ext}`;
+      const finalPath = path.join(WORK, finalName);
+      fs.renameSync(f.outPath, finalPath); cleanups.push(finalPath);
+      return { preset: f.preset, label: f.label, url: `/files/${finalName}`, width: f.width, height: f.height, bytes: f.bytes };
+    });
+    return { kit, durationSec: r.durationSec, fps: r.fps, cleanup: () => cleanups.forEach((p) => { try { fs.unlinkSync(p); } catch (_) {} }) };
+  });
+}
+
+const queue = new JobQueue({ concurrency: CONCURRENCY, processor: (job, op) => job.payload.kit ? runKit(job, op) : runRender(job, op) });
 
 // Allow the UI (hosted anywhere, e.g. Netlify) to call this render API.
 // Lock CORS_ORIGIN to your Netlify URL in production; defaults to "*" for testing.
@@ -192,7 +215,7 @@ const server = http.createServer((req, res) => {
       if (!ok) return sendJSON(res, 402, { error: 'Payment required' });
       paid.set(o.jobId, true);
       const pd = tierOpts('paid');
-      const job = queue.add({ ...src.params, quality: pd.quality, watermark: false, maxHeight: pd.maxHeight });
+      const job = queue.add({ ...src.params, kit: true, quality: pd.quality });
       sendJSON(res, 200, { cleanJobId: job.id });
     });
   }

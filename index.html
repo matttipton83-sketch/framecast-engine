@@ -37,7 +37,8 @@
   /* nav */
   .nav{display:flex;align-items:center;justify-content:space-between;padding:22px 4px 8px}
   .brand{display:flex;align-items:center;gap:11px}
-  .logo{width:30px;height:30px;border-radius:9px;background:var(--grad);box-shadow:0 6px 20px rgba(124,140,255,.55)}
+  .logo{width:32px;height:32px;border-radius:9px;background:var(--grad);box-shadow:0 6px 20px rgba(124,140,255,.55);display:grid;place-items:center}
+  .logo svg{width:19px;height:auto;display:block}
   .brand .name{font-weight:600;letter-spacing:-.2px;font-size:18px}
   .nav .meta{font-size:12.5px;color:var(--muted2)}
 
@@ -116,6 +117,15 @@
   video#result{width:100%;border-radius:13px;margin-top:14px;display:none;background:#000;border:1px solid var(--line);box-shadow:0 20px 50px rgba(0,0,0,.5)}
   video#result.show{display:block}
 
+  /* content kit grid — one drop, every platform */
+  .kit{display:none;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));gap:10px;margin-top:14px}
+  .kit.show{display:grid}
+  .kititem{display:block;text-decoration:none;color:var(--ink);border:1px solid var(--line2);background:var(--panel);border-radius:12px;padding:13px;transition:.15s}
+  .kititem:hover{border-color:var(--accent);background:rgba(124,140,255,.1);transform:translateY(-1px)}
+  .ki-label{font-weight:600;font-size:13.5px;margin-bottom:3px}
+  .ki-dim{color:var(--muted2);font-size:11.5px;margin-bottom:9px}
+  .ki-save{font-size:12.5px;font-weight:700;background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+
   .freebox{display:none;margin-top:14px;background:rgba(124,140,255,.07);border:1px solid var(--line2);border-radius:14px;padding:15px}
   .freebox .ft{font-weight:600;font-size:14px;margin-bottom:4px}
   .freebox .fs{color:var(--muted);font-size:12.5px;margin-bottom:13px;line-height:1.5}
@@ -143,7 +153,7 @@
   <div class="wrap">
 
     <nav class="nav">
-      <div class="brand"><span class="logo"></span><span class="name">Framecast</span></div>
+      <div class="brand"><span class="logo"><svg viewBox="0 0 1802.95 1651.52" fill="#fff" aria-hidden="true"><path d="M375.78,74.86l61.54,23.57v108.67l-66.78-27.5c-5.24-1.31-10.47-1.31-14.4,1.31-3.93,3.93-6.55,7.86-6.55,13.09v1263.5c0,5.24,2.62,9.17,6.55,13.09,3.93,2.62,9.17,2.62,14.4,1.31l66.78-26.19v107.37l-61.54,23.57c-28.81,11.78-60.23,9.17-86.42-9.17-26.19-18.33-40.59-44.52-40.59-77.25V161.27c0-32.73,14.4-58.92,40.59-77.25,26.19-18.33,57.61-20.95,86.42-9.17h0Z"/><path d="M1057.94,1004.48v-284.12l-108.67-61.54-121.77-70.7-121.77,70.7-107.36,61.54v841.9l111.29,13.09,197.71-77.25h0l518.49-206.87v-255.32l-212.11-121.77-155.81,90.34ZM1152.21,1073.88h121.77v121.77h-121.77v-121.77ZM767.27,787.13h121.77v121.77h-121.77v-121.77Z"/><path d="M127,173.06l61.54,23.57v107.36l-66.78-26.19c-5.24-1.31-10.47-1.31-14.4,1.31-3.93,3.93-6.55,7.86-6.55,13.09v1067.1c0,5.24,2.62,10.47,6.55,13.09,3.93,2.62,9.17,3.93,14.4,1.31l66.78-26.19v107.36l-61.54,24.88c-28.81,11.78-60.23,7.86-86.42-10.47-26.19-17.02-40.59-44.52-40.59-75.94V259.47c0-32.73,14.4-58.92,40.59-77.25,26.19-18.33,57.61-20.95,86.42-9.17h0Z"/><path d="M624.55,6.77l841.9,335.19c36.66,14.4,58.92,47.14,58.92,86.42v794.76c0,39.28-22.26,72.01-58.92,86.42l-841.9,335.19c-28.81,11.78-60.23,7.86-86.42-9.17-26.19-18.33-40.59-45.83-40.59-77.25V93.19c0-31.42,14.4-58.92,40.59-77.25,26.19-17.02,57.61-20.95,86.42-9.17h0ZM598.36,127.23v1398.36c0,5.24,1.31,9.17,6.55,11.78,3.93,3.93,9.17,3.93,14.4,2.62l806.55-322.09V433.61L619.31,112.83c-5.24-2.62-10.47-2.62-14.4,1.31-5.24,2.62-6.55,6.55-6.55,13.09h0Z"/><path d="M1335.52,784.51l197.71-113.91,197.71-113.91c15.71-9.17,32.73-9.17,48.45,0,14.4,7.86,23.57,23.57,23.57,40.59v456.96c0,17.02-9.17,32.73-23.57,40.59-15.71,9.17-32.73,9.17-48.45,0l-197.71-113.91-197.71-113.91c-14.4-9.17-23.57-23.57-23.57-40.59,0-18.33,9.17-32.73,23.57-41.9h0Z"/><path d="M958.43,347.2c54.99,0,99.51,45.83,99.51,100.82s-44.52,99.51-99.51,99.51-100.82-44.52-100.82-99.51,45.83-100.82,100.82-100.82h0Z"/></svg></span><span class="name">Framecast</span></div>
       <div class="meta">Frame-perfect HTML → video</div>
     </nav>
 
@@ -198,12 +208,13 @@
           <div class="status" id="status"></div>
 
           <video id="result" controls loop playsinline preload="metadata"></video>
+          <div id="kit" class="kit"></div>
 
           <div id="freebox" class="freebox">
             <div class="ft">Free preview · first 10s · watermark</div>
-            <div class="fs">This is a 10-second teaser. Get your full-length, full-resolution video — no watermark.</div>
-            <button class="export" id="unlock" style="margin-top:0">Download clean version — <span id="price">$2.99</span></button>
-            <div class="hint">One-time payment · no subscription</div>
+            <div class="fs">This is a 10-second teaser. Unlock your full-length video in <b>every format</b> — YouTube, Vertical &amp; Square — no watermark.</div>
+            <button class="export" id="unlock" style="margin-top:0">Get all formats — <span id="price">$2.99</span></button>
+            <div class="hint">One-time payment · no subscription · drop once, post everywhere</div>
           </div>
 
           <div class="ractions" id="ractions">
@@ -247,7 +258,7 @@ fileInput.onchange=e=>{const f=e.target.files[0];if(f)loadFile(f);};
 $('#clear').onclick=e=>{e.stopPropagation();reset();};
 $('#again').onclick=reset;
 function loadFile(f){const r=new FileReader();r.onload=()=>{state.html=r.result;state.fname=f.name.replace(/\.[^.]+$/,'');$('#fname').textContent=f.name;$('#empty').style.display='none';$('#loaded').classList.add('show');$('#preview').srcdoc=state.html;$('#export').disabled=false;$('#exhint').textContent='Ready — choose a format and export';};r.readAsText(f);}
-function reset(){try{history.replaceState({},'',location.pathname);}catch(e){}state.html=null;$('#empty').style.display='flex';$('#loaded').classList.remove('show');$('#preview').srcdoc='';$('#export').disabled=true;$('#exhint').textContent='Drop a file to begin';$('#bar').classList.remove('show');$('#result').classList.remove('show');$('#ractions').classList.remove('show');$('#status').textContent='';}
+function reset(){try{history.replaceState({},'',location.pathname);}catch(e){}state.html=null;$('#empty').style.display='flex';$('#loaded').classList.remove('show');$('#preview').srcdoc='';$('#export').disabled=true;$('#exhint').textContent='Drop a file to begin';$('#bar').classList.remove('show');$('#result').classList.remove('show');$('#kit').classList.remove('show');$('#ractions').classList.remove('show');$('#status').textContent='';}
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 let lastJobId=null;            // the free-preview job (used to checkout)
 
@@ -282,13 +293,21 @@ async function pollJob(id,verb){
     else { if(++fails>25) throw new Error(st.error||'Render failed'); } // not-found-yet / transient
   }
 }
-function showVideo(st){const u=abs(st.url);const v=$('#result');v.src=u;v.classList.add('show');$('#download').href=u;$('#download').download=(state.fname||'video')+'.'+st.url.split('.').pop();}
+function showVideo(st){const u=abs(st.url);const v=$('#result');v.src=u;v.classList.add('show');$('#kit').classList.remove('show');$('#download').style.display='';$('#download').href=u;$('#download').download=(state.fname||'video')+'.'+st.url.split('.').pop();}
+// One drop -> every platform: show the main preview + a grid of all formats.
+function showKit(kit){
+  const v=$('#result');v.src=abs(kit[0].url);v.classList.add('show');
+  const k=$('#kit');k.innerHTML='';
+  kit.forEach(f=>{const a=document.createElement('a');a.className='kititem';a.href=abs(f.url);a.download=(state.fname||'video')+'-'+f.preset+'.'+f.url.split('.').pop();a.innerHTML=`<div class="ki-label">${f.label}</div><div class="ki-dim">${f.width}×${f.height} · ${(f.bytes/1e6).toFixed(1)} MB</div><div class="ki-save">↓ Save</div>`;k.appendChild(a);});
+  k.classList.add('show');$('#download').style.display='none';
+}
+function showResult(st){ if(st.kit&&st.kit.length){showKit(st.kit);return `Content kit ready · ${st.kit.length} formats · ${st.durationSec}s · no watermark`;} showVideo(st); return `Clean export ready · ${st.width}×${st.height} · ${st.durationSec}s · ${(st.bytes/1e6).toFixed(1)} MB · no watermark`; }
 
 // Step 1: free preview
 $('#export').onclick=async()=>{
   if(!state.html)return;
   $('#export').disabled=true;$('#bar').classList.add('show');$('#barfill').style.width='4%';
-  $('#result').classList.remove('show');$('#ractions').classList.remove('show');$('#freebox').style.display='none';$('#status').textContent='Submitting…';
+  $('#result').classList.remove('show');$('#kit').classList.remove('show');$('#ractions').classList.remove('show');$('#freebox').style.display='none';$('#status').textContent='Submitting…';
   try{
     const j=await jfetch(API+'/api/jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({html:state.html,name:state.fname,preset:state.preset,durationSec:state.dur||undefined})});
     lastJobId=j.jobId;if(j.price)$('#price').textContent=j.price;
@@ -308,9 +327,9 @@ async function renderClean(jobId,session){
     // Make this render shareable/bookmarkable: the URL now points at the job,
     // so the user can leave and come back (or send the link) without re-rendering.
     try{ history.replaceState({},'', '?job='+encodeURIComponent(d.cleanJobId)); }catch(e){}
-    const st=await pollJob(d.cleanJobId,'Rendering clean');
-    $('#status').textContent=`Clean export ready · ${st.width}×${st.height} · ${st.durationSec}s · ${(st.bytes/1e6).toFixed(1)} MB · no watermark`;
-    showVideo(st);$('#ractions').classList.add('show');
+    const st=await pollJob(d.cleanJobId,'Rendering your kit');
+    $('#status').textContent=showResult(st);
+    $('#ractions').classList.add('show');
   }catch(err){$('#status').textContent='⚠ '+err.message;}
 }
 
@@ -319,8 +338,8 @@ async function watchJob(jobId){
   $('#freebox').style.display='none';$('#bar').classList.add('show');$('#barfill').style.width='8%';$('#status').textContent='Loading your render…';
   try{
     const st=await pollJob(jobId,'Rendering');
-    $('#status').textContent=`Clean export ready · ${st.width}×${st.height} · ${st.durationSec}s · ${(st.bytes/1e6).toFixed(1)} MB · no watermark`;
-    showVideo(st);$('#ractions').classList.add('show');
+    $('#status').textContent=showResult(st);
+    $('#ractions').classList.add('show');
   }catch(err){$('#status').textContent='⚠ '+err.message+' — this link may have expired.';}
 }
 
