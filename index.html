@@ -3,93 +3,220 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Framecast</title>
+<title>Framecast — turn HTML animations into flawless video</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
-  :root{--bg:#0b0e16;--panel:#121726;--panel2:#161c2e;--line:#222b42;--ink:#eef2fb;--muted:#93a0bd;--accent:#7c9bff;--accent2:#56e0c0;--grad:linear-gradient(120deg,#7c9bff,#9a7cff 45%,#56e0c0);--radius:16px}
-  *{box-sizing:border-box}html,body{margin:0;height:100%}
-  body{background:radial-gradient(1200px 700px at 70% -10%,#1a2342,transparent),var(--bg);background-color:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-font-smoothing:antialiased;display:flex;flex-direction:column;min-height:100%}
-  header{display:flex;align-items:center;gap:12px;padding:20px 26px}
-  .logo{width:30px;height:30px;border-radius:9px;background:var(--grad);box-shadow:0 6px 18px rgba(124,155,255,.5)}
-  .brand{font-weight:700;letter-spacing:-.3px;font-size:18px}
-  .brand small{display:block;font-weight:500;color:var(--muted);font-size:11px;letter-spacing:.4px;text-transform:uppercase}
-  main{flex:1;display:grid;grid-template-columns:1.15fr .85fr;gap:22px;padding:6px 26px 26px;max-width:1100px;margin:0 auto;width:100%}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:20px}
-  h2{font-size:13px;text-transform:uppercase;letter-spacing:.6px;color:var(--muted);margin:0 0 14px}
-  .drop{border:1.5px dashed #2c3856;border-radius:14px;background:var(--panel2);min-height:210px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:10px;cursor:pointer;transition:.18s;padding:24px}
-  .drop:hover,.drop.drag{border-color:var(--accent);background:#18203a}
-  .drop .ico{width:54px;height:54px;border-radius:14px;background:var(--grad);display:grid;place-items:center;font-size:26px;color:#0b0e16;font-weight:800}
-  .drop .big{font-size:17px;font-weight:600}.drop .sub{color:var(--muted);font-size:13px;max-width:330px}
-  .loaded{display:none;align-items:center;gap:12px;justify-content:center}.loaded.show{display:flex}
-  .filechip{background:#1c2440;border:1px solid var(--line);border-radius:10px;padding:9px 13px;font-weight:600;max-width:70%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .link{color:var(--accent);cursor:pointer;font-size:13px}
-  iframe{width:100%;height:190px;border:1px solid var(--line);border-radius:12px;background:#000}
-  .formats{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-  .fmt{border:1px solid var(--line);border-radius:12px;padding:12px;cursor:pointer;background:var(--panel2);transition:.15s}
-  .fmt:hover{border-color:#39456b}.fmt.sel{border-color:var(--accent);box-shadow:0 0 0 2px rgba(124,155,255,.25) inset}
-  .fmt .name{font-weight:600;font-size:14px;margin-bottom:3px}.fmt .dim{color:var(--muted);font-size:12px}
-  .row{display:flex;align-items:center;justify-content:space-between;gap:14px;margin:18px 0 6px}
-  .row label{font-weight:600;font-size:14px}.val{color:var(--accent2);font-weight:700;font-variant-numeric:tabular-nums}
-  input[type=range]{width:100%;accent-color:var(--accent)}
-  .seg{display:flex;gap:6px;background:var(--panel2);padding:5px;border-radius:11px;border:1px solid var(--line)}
-  .seg button{flex:1;border:0;background:transparent;color:var(--muted);padding:8px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px}
-  .seg button.sel{background:var(--accent);color:#0b0e16}
-  .export{margin-top:18px;width:100%;border:0;border-radius:13px;padding:15px;font-size:16px;font-weight:700;color:#0b0e16;background:var(--grad);cursor:pointer;transition:.15s}
-  .export:hover{filter:brightness(1.06)}.export:disabled{opacity:.5;cursor:not-allowed;filter:none}
-  .hint{color:var(--muted);font-size:12px;text-align:center;margin-top:9px}
-  .bar{height:10px;background:var(--panel2);border:1px solid var(--line);border-radius:99px;overflow:hidden;display:none;margin-top:16px}.bar.show{display:block}
-  .bar i{display:block;height:100%;width:0;background:var(--grad);transition:width .25s}
-  .status{font-size:13px;color:var(--muted);margin-top:8px;min-height:18px}
-  video{width:100%;border-radius:12px;margin-top:14px;display:none;background:#000;border:1px solid var(--line)}video.show{display:block}
-  .ractions{display:none;gap:10px;margin-top:12px}.ractions.show{display:flex}
-  .btn2{flex:1;text-align:center;border:1px solid var(--line);background:var(--panel2);color:var(--ink);padding:11px;border-radius:11px;font-weight:600;cursor:pointer;text-decoration:none}
-  .btn2.primary{background:var(--accent);color:#0b0e16;border-color:var(--accent)}
-  footer{color:var(--muted);font-size:12px;text-align:center;padding:14px}
-  @media(max-width:880px){main{grid-template-columns:1fr}}
+  :root{
+    --bg:#06070e; --ink:#eef1fb; --muted:#aab3d0; --muted2:#868fb0;
+    --line:rgba(255,255,255,.09); --line2:rgba(255,255,255,.16);
+    --glass:rgba(255,255,255,.045); --panel:rgba(255,255,255,.03);
+    --grad:linear-gradient(110deg,#8b9dff,#b388ff 45%,#5ee0c0);
+    --accent:#8b9dff; --accent2:#5ee0c0;
+    --radius:22px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--ink); min-height:100vh; overflow-x:hidden; position:relative;
+    font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+    -webkit-font-smoothing:antialiased; line-height:1.5;
+  }
+  /* living aurora background */
+  .aurora{position:fixed;inset:0;overflow:hidden;pointer-events:none;z-index:0}
+  .aurora b{position:absolute;border-radius:50%;filter:blur(70px);opacity:.5;display:block}
+  .aurora .a1{width:46vw;height:46vw;left:-8vw;top:-10vw;background:radial-gradient(circle,#6d5cff,transparent 62%);animation:drift1 18s ease-in-out infinite}
+  .aurora .a2{width:42vw;height:42vw;right:-10vw;top:2vw;background:radial-gradient(circle,#11d6b6,transparent 62%);opacity:.38;animation:drift2 22s ease-in-out infinite}
+  .aurora .a3{width:40vw;height:40vw;left:30%;bottom:-18vw;background:radial-gradient(circle,#b06cff,transparent 62%);opacity:.4;animation:drift1 26s ease-in-out infinite reverse}
+  @keyframes drift1{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(3vw,2.5vw) scale(1.12)}}
+  @keyframes drift2{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(-3vw,2vw) scale(1.1)}}
+
+  .wrap{position:relative;z-index:1;max-width:1040px;margin:0 auto;padding:0 22px 60px}
+
+  /* nav */
+  .nav{display:flex;align-items:center;justify-content:space-between;padding:22px 4px 8px}
+  .brand{display:flex;align-items:center;gap:11px}
+  .logo{width:30px;height:30px;border-radius:9px;background:var(--grad);box-shadow:0 6px 20px rgba(124,140,255,.55)}
+  .brand .name{font-weight:600;letter-spacing:-.2px;font-size:18px}
+  .nav .meta{font-size:12.5px;color:var(--muted2)}
+
+  /* hero */
+  .hero{text-align:center;max-width:620px;margin:48px auto 30px;animation:rise .8s cubic-bezier(.2,.8,.2,1) both}
+  .eyebrow{display:inline-flex;align-items:center;gap:8px;font-size:11.5px;letter-spacing:1.6px;color:#b3bcdb;
+    border:1px solid var(--line2);background:var(--panel);padding:7px 14px;border-radius:999px;margin-bottom:22px}
+  .eyebrow .star{color:var(--accent2)}
+  h1{font-size:clamp(38px,6.4vw,62px);line-height:1.03;font-weight:600;letter-spacing:-1.6px;margin:0 0 18px}
+  .grad{background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .sub{font-size:clamp(15px,2.2vw,18px);line-height:1.6;color:var(--muted);max-width:480px;margin:0 auto}
+  .trust{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:18px;margin-top:24px;font-size:12.5px;color:var(--muted2)}
+  .trust span{display:inline-flex;align-items:center;gap:6px}
+  .trust .tick{color:var(--accent2);font-weight:700}
+
+  /* studio glass card */
+  .studio{background:var(--glass);border:1px solid var(--line);border-radius:var(--radius);
+    box-shadow:0 40px 100px rgba(0,0,0,.55);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+    padding:22px;margin-top:8px;animation:rise .9s .08s cubic-bezier(.2,.8,.2,1) both}
+  .grid{display:grid;grid-template-columns:1.04fr .96fr;gap:22px}
+  .label{font-size:11.5px;text-transform:uppercase;letter-spacing:1px;color:var(--muted2);margin:0 0 11px;font-weight:600}
+
+  /* drop zone */
+  .drop{border:1.5px dashed rgba(140,155,230,.42);border-radius:16px;
+    background:linear-gradient(180deg,rgba(124,140,255,.06),rgba(86,224,192,.03));
+    min-height:210px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;
+    gap:11px;cursor:pointer;transition:.2s;padding:24px}
+  .drop:hover,.drop.drag{border-color:var(--accent);background:linear-gradient(180deg,rgba(124,140,255,.13),rgba(86,224,192,.06));transform:translateY(-1px);box-shadow:0 0 0 4px rgba(124,140,255,.08)}
+  .drop .ico{width:52px;height:52px;border-radius:14px;background:var(--grad);display:grid;place-items:center;
+    font-size:25px;color:#06070f;font-weight:800;box-shadow:0 10px 26px rgba(124,140,255,.5)}
+  .drop .big{font-size:16px;font-weight:600}
+  .drop .sub2{color:var(--muted2);font-size:12.5px;max-width:300px;line-height:1.5}
+  #empty{display:flex;flex-direction:column;align-items:center;gap:11px}
+  .loaded{display:none;align-items:center;gap:12px;justify-content:center;flex-wrap:wrap}
+  .loaded.show{display:flex}
+  .filechip{background:rgba(124,140,255,.14);border:1px solid var(--line2);border-radius:10px;padding:9px 14px;font-weight:600;font-size:13.5px;max-width:70%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .link{color:var(--accent);cursor:pointer;font-size:13px;font-weight:500}
+
+  iframe#preview{width:100%;height:194px;border:1px solid var(--line);border-radius:13px;background:#000;margin-bottom:2px}
+
+  /* format chips */
+  .formats{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+  .fmt{border:1px solid var(--line);border-radius:12px;padding:11px 13px;cursor:pointer;background:var(--panel);transition:.16s;position:relative}
+  .fmt:hover{border-color:var(--line2);transform:translateY(-1px)}
+  .fmt.sel{border-color:transparent;background:rgba(124,140,255,.13);box-shadow:0 0 0 1.5px var(--accent), 0 8px 22px rgba(124,140,255,.18)}
+  .fmt .name{font-weight:600;font-size:13.5px;margin-bottom:2px}
+  .fmt .dim{color:var(--muted2);font-size:11.5px}
+
+  .ctl-row{display:flex;align-items:center;justify-content:space-between;gap:14px;margin:20px 0 8px}
+  .ctl-row label{font-weight:600;font-size:14px}
+  .val{font-weight:700;font-variant-numeric:tabular-nums;background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+  input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:6px;border-radius:999px;
+    background:linear-gradient(90deg,var(--accent),var(--accent2)) no-repeat,rgba(255,255,255,.1);
+    background-size:30% 100%;outline:none;cursor:pointer}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 2px 10px rgba(0,0,0,.5);cursor:pointer}
+  input[type=range]::-moz-range-thumb{width:18px;height:18px;border:0;border-radius:50%;background:#fff;cursor:pointer}
+  .hint-left{color:var(--muted2);font-size:11.5px;margin-top:7px}
+
+  .seg{display:flex;gap:6px;background:var(--panel);padding:5px;border-radius:12px;border:1px solid var(--line)}
+  .seg button{flex:1;border:0;background:transparent;color:var(--muted);padding:9px;border-radius:8px;font-weight:600;cursor:pointer;font-size:13px;font-family:inherit;transition:.15s}
+  .seg button.sel{background:var(--grad);color:#06070f}
+
+  .export{margin-top:20px;width:100%;border:0;border-radius:13px;padding:15px;font-size:16px;font-weight:600;
+    color:#06070f;background:var(--grad);background-size:200% 100%;cursor:pointer;font-family:inherit;
+    box-shadow:0 14px 36px rgba(124,140,255,.45);transition:.2s;animation:shimmer 6s linear infinite}
+  .export:hover{filter:brightness(1.07);transform:translateY(-1px)}
+  .export:disabled{opacity:.45;cursor:not-allowed;filter:none;box-shadow:none;animation:none}
+  @keyframes shimmer{0%{background-position:0% 0}100%{background-position:200% 0}}
+  .hint{color:var(--muted2);font-size:12px;text-align:center;margin-top:10px}
+
+  .bar{height:9px;background:rgba(255,255,255,.07);border:1px solid var(--line);border-radius:999px;overflow:hidden;display:none;margin-top:16px;position:relative}
+  .bar.show{display:block}
+  .bar i{display:block;height:100%;width:0;background:var(--grad);background-size:200% 100%;border-radius:999px;transition:width .3s;animation:shimmer 2.5s linear infinite}
+  .status{font-size:13px;color:var(--muted);margin-top:9px;min-height:18px}
+
+  video#result{width:100%;border-radius:13px;margin-top:14px;display:none;background:#000;border:1px solid var(--line);box-shadow:0 20px 50px rgba(0,0,0,.5)}
+  video#result.show{display:block}
+
+  .freebox{display:none;margin-top:14px;background:rgba(124,140,255,.07);border:1px solid var(--line2);border-radius:14px;padding:15px}
+  .freebox .ft{font-weight:600;font-size:14px;margin-bottom:4px}
+  .freebox .fs{color:var(--muted);font-size:12.5px;margin-bottom:13px;line-height:1.5}
+
+  .ractions{display:none;gap:10px;margin-top:13px;flex-wrap:wrap}
+  .ractions.show{display:flex}
+  .btn2{flex:1;min-width:120px;text-align:center;border:1px solid var(--line2);background:var(--panel);color:var(--ink);
+    padding:12px;border-radius:11px;font-weight:600;cursor:pointer;text-decoration:none;font-size:14px;transition:.15s}
+  .btn2:hover{border-color:var(--accent);background:rgba(124,140,255,.1)}
+  .btn2.primary{background:var(--grad);color:#06070f;border-color:transparent;box-shadow:0 10px 26px rgba(124,140,255,.4)}
+
+  footer{text-align:center;color:var(--muted2);font-size:12.5px;margin-top:34px}
+  footer .dot{opacity:.5;margin:0 7px}
+
+  @keyframes rise{from{opacity:0;transform:translateY(22px)}to{opacity:1;transform:none}}
+  @media(max-width:840px){
+    .grid{grid-template-columns:1fr}
+    .hero{margin:30px auto 22px}
+    .nav .meta{display:none}
+  }
 </style>
 </head>
 <body>
-  <header><div class="logo"></div><div class="brand">Framecast<small>HTML animation → clean video</small></div></header>
-  <main>
-    <section class="card">
-      <h2>1 · Drop your animation</h2>
-      <div class="drop" id="drop">
-        <div id="empty" style="display:flex;flex-direction:column;align-items:center;gap:10px">
-          <div class="ico">↑</div><div class="big">Drop a Claude HTML file here</div>
-          <div class="sub">Or click to browse. CSS, canvas, GSAP, SVG — all supported.</div>
+  <div class="aurora"><b class="a1"></b><b class="a2"></b><b class="a3"></b></div>
+  <div class="wrap">
+
+    <nav class="nav">
+      <div class="brand"><span class="logo"></span><span class="name">Framecast</span></div>
+      <div class="meta">Frame-perfect HTML → video</div>
+    </nav>
+
+    <section class="hero">
+      <div class="eyebrow"><span class="star">✦</span> THE HTML-ANIMATION VIDEO STUDIO</div>
+      <h1>Your animations,<br>rendered <span class="grad">flawless.</span></h1>
+      <p class="sub">Turn any Claude animation into frame-perfect video for YouTube, TikTok &amp; Reels. No screen recording, no stutter, no watermark when you ship.</p>
+      <div class="trust">
+        <span><span class="tick">✓</span> Frame-perfect</span>
+        <span><span class="tick">✓</span> No watermark</span>
+        <span><span class="tick">✓</span> Up to 4K</span>
+        <span><span class="tick">✓</span> GSAP · CSS · canvas · SVG</span>
+      </div>
+    </section>
+
+    <section class="studio">
+      <div class="grid">
+        <div class="col">
+          <div class="label">1 · Drop your animation</div>
+          <div class="drop" id="drop">
+            <div id="empty">
+              <div class="ico">↑</div>
+              <div class="big">Drop your Claude animation</div>
+              <div class="sub2">HTML file or paste an artifact · GSAP, CSS, canvas &amp; SVG all supported</div>
+            </div>
+            <div class="loaded" id="loaded"><span class="filechip" id="fname"></span><span class="link" id="clear">change</span></div>
+            <input type="file" id="file" accept=".html,.htm" hidden>
+          </div>
+          <div class="label" style="margin-top:20px">Live preview</div>
+          <iframe id="preview"></iframe>
         </div>
-        <div class="loaded" id="loaded"><span class="filechip" id="fname"></span><span class="link" id="clear">change</span></div>
-        <input type="file" id="file" accept=".html,.htm" hidden>
+
+        <div class="col">
+          <div class="label">2 · Pick a format</div>
+          <div class="formats" id="formats"></div>
+
+          <div class="ctl-row"><label>Length</label><span class="val" id="durval">Auto</span></div>
+          <input type="range" id="dur" min="0" max="75" value="0">
+          <div class="hint-left">0 = auto-trim to your animation · drag up to 1:15</div>
+
+          <div class="label" style="margin-top:20px">Quality</div>
+          <div class="seg" id="quality">
+            <button data-q="high" class="sel">High</button>
+            <button data-q="balanced">Balanced</button>
+            <button data-q="small">Small file</button>
+          </div>
+
+          <button class="export" id="export" disabled>Export video</button>
+          <div class="hint" id="exhint">Drop a file to begin</div>
+
+          <div class="bar" id="bar"><i id="barfill"></i></div>
+          <div class="status" id="status"></div>
+
+          <video id="result" controls loop playsinline preload="metadata"></video>
+
+          <div id="freebox" class="freebox">
+            <div class="ft">Free preview · first 10s · watermark</div>
+            <div class="fs">This is a 10-second teaser. Get your full-length, full-resolution video — no watermark.</div>
+            <button class="export" id="unlock" style="margin-top:0">Download clean version — <span id="price">$2.99</span></button>
+            <div class="hint">One-time payment · no subscription</div>
+          </div>
+
+          <div class="ractions" id="ractions">
+            <a class="btn2 primary" id="download" download>Save clean video</a>
+            <span class="btn2" id="copylink">Copy link</span>
+            <span class="btn2" id="again">Make another</span>
+          </div>
+        </div>
       </div>
-      <h2 style="margin-top:22px">Preview</h2>
-      <iframe id="preview"></iframe>
     </section>
-    <section class="card">
-      <h2>2 · Pick a format</h2>
-      <div class="formats" id="formats"></div>
-      <div class="row"><label>Length</label><span class="val" id="durval">Auto</span></div>
-      <input type="range" id="dur" min="0" max="75" value="0">
-      <div class="hint" style="text-align:left;margin-top:4px">0 = auto-trim to your animation · drag up to 1:15</div>
-      <div class="row"><label>Quality</label></div>
-      <div class="seg" id="quality">
-        <button data-q="high" class="sel">High</button>
-        <button data-q="balanced">Balanced</button>
-        <button data-q="small">Small file</button>
-      </div>
-      <button class="export" id="export" disabled>Export video</button>
-      <div class="hint" id="exhint">Drop a file to begin</div>
-      <div class="bar" id="bar"><i id="barfill"></i></div>
-      <div class="status" id="status"></div>
-      <video id="result" controls loop></video>
-      <div id="freebox" style="display:none;margin-top:12px;background:#161c2e;border:1px solid var(--line);border-radius:12px;padding:14px">
-        <div style="font-weight:600;margin-bottom:4px">Free preview · first 10s · watermark</div>
-        <div style="color:var(--muted);font-size:13px;margin-bottom:12px">This is a 10-second teaser. Get your full-length, full-resolution video — no watermark.</div>
-        <button class="export" id="unlock" style="margin-top:0">Download clean version — <span id="price">$2.99</span></button>
-        <div class="hint">One-time payment · no subscription</div>
-      </div>
-      <div class="ractions" id="ractions"><a class="btn2 primary" id="download" download>Save clean video</a><span class="btn2" id="copylink">Copy link</span><span class="btn2" id="again">Make another</span></div>
-    </section>
-  </main>
-  <footer>Framecast · frame-perfect capture · no watermark</footer>
+
+    <footer>Framecast<span class="dot">·</span>frame-perfect capture<span class="dot">·</span>no watermark when you ship</footer>
+  </div>
 <script>
 const FORMATS=[
   {id:'auto',name:'Auto-detect',dim:'match the animation'},
