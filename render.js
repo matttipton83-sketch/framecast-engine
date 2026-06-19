@@ -17,17 +17,34 @@ const virtualTimeScript = require('./virtual-time');
 
 const HARD_CAP_SEC = 75; // product ceiling: 1:15
 
-// Find a usable bold font for the watermark; returns null if none (watermark skipped).
+// Recursively find the first .ttf/.otf under a directory (last-resort fallback).
+function scanForFont(dir, depth = 0) {
+  if (depth > 4) return null;
+  let entries;
+  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch (_) { return null; }
+  for (const e of entries) {
+    const p = dir + '/' + e.name;
+    if (e.isDirectory()) { const r = scanForFont(p, depth + 1); if (r) return r; }
+    else if (/\.(ttf|otf)$/i.test(e.name)) return p;
+  }
+  return null;
+}
+
+// Find a usable font for the watermark. Tries known paths, then scans the system
+// font dirs so it works on any image (Render's Playwright image ships Liberation/Noto,
+// not DejaVu at the old path — which is why the watermark was silently skipped).
 function findFont() {
   const candidates = [
     '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
+    '/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf',
+    '/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf',
+    '/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf',
     '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
     '/System/Library/Fonts/Supplemental/Arial Bold.ttf',
     '/System/Library/Fonts/Helvetica.ttc',
-    '/usr/share/fonts/TTF/DejaVuSans-Bold.ttf',
   ];
   for (const f of candidates) { try { if (fs.statSync(f).isFile()) return f; } catch (_) {} }
-  return null;
+  return scanForFont('/usr/share/fonts') || scanForFont('/usr/local/share/fonts');
 }
 
 // Free-tier watermark: a faint centered brand mark (deters cropping) plus a
@@ -36,8 +53,8 @@ function watermarkFilter() {
   const font = findFont();
   if (!font) return null; // no font -> render without watermark rather than fail
   const ff = font.replace(/:/g, '\\:').replace(/ /g, '\\ ');
-  const center = `drawtext=fontfile='${ff}':text='FRAMECAST':fontcolor=white@0.22:fontsize=(h/9):x=(w-text_w)/2:y=(h-text_h)/2`;
-  const badge = `drawtext=fontfile='${ff}':text='Made with Framecast':fontcolor=white@0.7:fontsize=(h/40):box=1:boxcolor=black@0.35:boxborderw=10:x=w-text_w-28:y=h-text_h-28`;
+  const center = `drawtext=fontfile='${ff}':text='FRAMECAST':fontcolor=white@0.34:fontsize=(h/8):x=(w-text_w)/2:y=(h-text_h)/2:shadowcolor=black@0.35:shadowx=2:shadowy=2`;
+  const badge = `drawtext=fontfile='${ff}':text='Made with Framecast':fontcolor=white@0.92:fontsize=(h/34):box=1:boxcolor=black@0.55:boxborderw=12:x=w-text_w-28:y=h-text_h-28`;
   return `${center},${badge}`;
 }
 
