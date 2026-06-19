@@ -46,8 +46,9 @@
 
   /* nav */
   .nav{display:flex;align-items:center;justify-content:space-between;padding:24px 2px 6px}
-  .brand{display:flex;align-items:center;gap:11px}
-  .brand .mk{width:30px;aspect-ratio:1802.95/1651.52}
+  .brand{display:inline-flex;align-items:center;gap:11px;text-decoration:none;color:inherit;cursor:pointer}
+  .brand:hover .nm{color:#fff}
+  .brand .mk{width:30px;aspect-ratio:1802.95/1651.52;animation:logoIdle 6s ease-in-out infinite}
   .brand .nm{font-weight:800;font-size:19px;letter-spacing:-.02em}
   .home{display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;color:var(--muted);text-decoration:none;border:1px solid var(--line2);background:var(--glass);padding:9px 14px;border-radius:11px;transition:.18s}
   .home:hover{border-color:rgba(139,157,255,.5);color:var(--ink)}
@@ -55,8 +56,9 @@
 
   /* compact hero */
   .hero{text-align:center;max-width:600px;margin:30px auto 26px}
-  .hlogo{width:62px;aspect-ratio:1802.95/1651.52;margin:0 auto 16px;opacity:0;animation:heroGlow 3.6s ease-in-out infinite}
+  .hlogo{width:62px;aspect-ratio:1802.95/1651.52;margin:0 auto 16px;opacity:0;animation:heroGlow 3.6s ease-in-out infinite,logoIdle 6s ease-in-out infinite}
   @keyframes heroGlow{0%,100%{filter:drop-shadow(0 8px 26px rgba(139,157,255,.45))}50%{filter:drop-shadow(0 10px 34px rgba(94,224,192,.45))}}
+  @keyframes logoIdle{0%,100%{transform:translateY(0) rotate(0deg)}25%{transform:translateY(-2.5px) rotate(.8deg)}50%{transform:translateY(.5px) rotate(0deg)}75%{transform:translateY(2px) rotate(-.8deg)}}
   h1{font-size:clamp(34px,5vw,52px);line-height:1.0;font-weight:900;letter-spacing:-.04em;margin:0 0 12px}
   .sub{font-size:15.5px;color:var(--muted);max-width:430px;margin:0 auto}
 
@@ -81,7 +83,7 @@
   .filechip{flex:1;background:rgba(124,140,255,.14);border:1px solid var(--line2);border-radius:11px;padding:11px 14px;font-weight:600;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .link{color:var(--accent);cursor:pointer;font-size:13px;font-weight:600;flex:none}
 
-  iframe#preview{width:100%;height:190px;border:1px solid var(--line);border-radius:13px;background:#000;display:block}
+  iframe#preview{width:100%;height:340px;border:1px solid var(--line);border-radius:13px;background:#000;display:block}
 
   .formats{display:grid;grid-template-columns:1fr 1fr;gap:9px}
   .fmt{border:1px solid var(--line);border-radius:12px;padding:11px 13px;cursor:pointer;background:var(--panel);transition:.16s}
@@ -137,6 +139,27 @@
   footer{text-align:center;color:var(--muted2);font-size:12.5px;margin-top:30px}
   footer .dot{opacity:.5;margin:0 7px}
 
+  /* purchase modal */
+  .modal{position:fixed;inset:0;z-index:85;display:none;align-items:center;justify-content:center;padding:24px;background:rgba(4,5,12,.72);backdrop-filter:blur(8px)}
+  .modal.show{display:flex}
+  .sheet{position:relative;width:100%;max-width:560px;background:rgba(20,22,36,.92);border:1px solid var(--line2);border-radius:22px;padding:26px;box-shadow:0 50px 120px rgba(0,0,0,.6)}
+  .mclose{position:absolute;top:14px;right:18px;color:var(--muted2);font-size:17px;cursor:pointer;line-height:1}
+  .mclose:hover{color:var(--ink)}
+  .mhead{font-size:21px;font-weight:800;letter-spacing:-.02em}
+  .msub{color:var(--muted);font-size:13.5px;margin:4px 0 20px}
+  .plans{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+  .plan{position:relative;text-align:left;border:1px solid var(--line2);background:var(--panel);border-radius:16px;padding:18px;cursor:pointer;font-family:inherit;color:var(--ink);transition:.16s;display:flex;flex-direction:column;gap:8px}
+  .plan:hover{border-color:var(--accent);transform:translateY(-2px);background:rgba(124,140,255,.08)}
+  .plan.best{border-color:transparent;box-shadow:0 0 0 1.5px var(--accent2);background:rgba(94,224,192,.06)}
+  .pl-badge{position:absolute;top:-10px;left:16px;font-size:10px;font-weight:700;letter-spacing:.4px;color:#06070f;background:var(--grad);padding:3px 10px;border-radius:999px}
+  .pl-top{display:flex;align-items:baseline;justify-content:space-between}
+  .pl-name{font-size:15px;font-weight:700}
+  .pl-price{font-size:22px;font-weight:900;letter-spacing:-.02em}
+  .pl-price small{font-size:12px;font-weight:600;color:var(--muted2)}
+  .pl-d{font-size:12.5px;color:var(--muted2);line-height:1.5;flex:1}
+  .pl-cta{font-size:13px;font-weight:700;background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .mfoot{text-align:center;color:var(--muted2);font-size:11.5px;margin-top:16px}
+  @media(max-width:560px){.plans{grid-template-columns:1fr}}
   #confetti{position:fixed;inset:0;z-index:90;pointer-events:none;display:none}
 
   @keyframes rise{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:none}}
@@ -155,13 +178,12 @@
 
   <div class="wrap">
     <nav class="nav lift">
-      <div class="brand"><span class="mk" data-logo="full"></span><span class="nm">Framecast</span></div>
-      <a class="home" href="https://framecastvideo.com">framecastvideo.com <svg class="ic" viewBox="0 0 24 24"><path d="M7 17 17 7M9 7h8v8"/></svg></a>
+      <a class="brand" href="https://framecastvideo.com" title="Back to framecastvideo.com"><span class="mk" data-logo="full"></span><span class="nm">Framecast</span></a>
     </nav>
 
     <section class="hero lift">
       <div class="hlogo" id="heroLogo" data-logo="full"></div>
-      <h1>HTML in. <span class="grad">Flawless video</span> out.</h1>
+      <h1>HTML in.<br><span class="grad">Flawless video</span> out.</h1>
       <p class="sub">Drop your animation, pick a format, and export it clean — frame-perfect, no watermark.</p>
     </section>
 
@@ -225,6 +247,28 @@
     </section>
 
     <footer>Framecast<span class="dot">·</span>frame-perfect capture<span class="dot">·</span>no watermark when you ship</footer>
+  </div>
+
+  <div class="modal" id="payModal">
+    <div class="sheet">
+      <span class="mclose" id="mclose">✕</span>
+      <div class="mhead">Unlock your clean video</div>
+      <div class="msub">Watermark-free · every format · full resolution.</div>
+      <div class="plans">
+        <button class="plan" id="planSingle">
+          <div class="pl-top"><span class="pl-name">Single export</span><span class="pl-price">$2.99</span></div>
+          <div class="pl-d">One clean, watermark-free video in every format — YouTube, Vertical &amp; Square. One-time, no account.</div>
+          <span class="pl-cta">Unlock once →</span>
+        </button>
+        <button class="plan best" id="planPro">
+          <span class="pl-badge">RENDER A LOT?</span>
+          <div class="pl-top"><span class="pl-name">Pro</span><span class="pl-price">$9<small>/mo</small></span></div>
+          <div class="pl-d">Unlimited clean exports · export all sizes in one pass · priority queue. Or $79/yr.</div>
+          <span class="pl-cta">Go Pro →</span>
+        </button>
+      </div>
+      <div class="mfoot">Secure checkout · cancel anytime</div>
+    </div>
   </div>
 
   <svg width="0" height="0" style="position:absolute"><defs><linearGradient id="ig" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8b9dff"/><stop offset=".5" stop-color="#b388ff"/><stop offset="1" stop-color="#5ee0c0"/></linearGradient></defs></svg>
@@ -356,15 +400,21 @@ async function watchJob(jobId){
     $('#ractions').classList.add('show');
   }catch(err){$('#status').textContent='⚠ '+err.message+' — this link may have expired.';}
 }
-$('#unlock').onclick=async()=>{
+async function doUnlock(plan){
+  $('#payModal').classList.remove('show');
   if(!lastJobId)return;
   $('#unlock').disabled=true;$('#status').textContent='Opening checkout…';
   try{
-    const d=await jfetch(API+'/api/checkout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jobId:lastJobId,returnTo:location.origin})});
+    const d=await jfetch(API+'/api/checkout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jobId:lastJobId,plan:plan||'single',returnTo:location.origin})});
     if(d.live){ window.location.href=abs(d.url); }
     else { await renderClean(lastJobId,'dev'); }
   }catch(err){$('#status').textContent='⚠ '+err.message;$('#unlock').disabled=false;}
-};
+}
+$('#unlock').onclick=()=>{ if(!lastJobId)return; $('#payModal').classList.add('show'); };
+$('#planSingle').onclick=()=>doUnlock('single');
+$('#planPro').onclick=()=>doUnlock('pro');
+$('#mclose').onclick=()=>$('#payModal').classList.remove('show');
+$('#payModal').addEventListener('click',e=>{ if(e.target===$('#payModal')) $('#payModal').classList.remove('show'); });
 $('#copylink').onclick=async()=>{
   try{ await navigator.clipboard.writeText(location.href); const b=$('#copylink'); b.textContent='Copied!'; setTimeout(()=>b.textContent='Copy link',1500); }catch(e){}
 };
