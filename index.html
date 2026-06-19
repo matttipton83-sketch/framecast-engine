@@ -86,7 +86,7 @@
         <button class="export" id="unlock" style="margin-top:0">Download clean version — <span id="price">$2.99</span></button>
         <div class="hint">One-time payment · no subscription</div>
       </div>
-      <div class="ractions" id="ractions"><a class="btn2 primary" id="download" download>Save clean video</a><span class="btn2" id="again">Make another</span></div>
+      <div class="ractions" id="ractions"><a class="btn2 primary" id="download" download>Save clean video</a><span class="btn2" id="copylink">Copy link</span><span class="btn2" id="again">Make another</span></div>
     </section>
   </main>
   <footer>Framecast · frame-perfect capture · no watermark</footer>
@@ -120,7 +120,7 @@ fileInput.onchange=e=>{const f=e.target.files[0];if(f)loadFile(f);};
 $('#clear').onclick=e=>{e.stopPropagation();reset();};
 $('#again').onclick=reset;
 function loadFile(f){const r=new FileReader();r.onload=()=>{state.html=r.result;state.fname=f.name.replace(/\.[^.]+$/,'');$('#fname').textContent=f.name;$('#empty').style.display='none';$('#loaded').classList.add('show');$('#preview').srcdoc=state.html;$('#export').disabled=false;$('#exhint').textContent='Ready — choose a format and export';};r.readAsText(f);}
-function reset(){state.html=null;$('#empty').style.display='flex';$('#loaded').classList.remove('show');$('#preview').srcdoc='';$('#export').disabled=true;$('#exhint').textContent='Drop a file to begin';$('#bar').classList.remove('show');$('#result').classList.remove('show');$('#ractions').classList.remove('show');$('#status').textContent='';}
+function reset(){try{history.replaceState({},'',location.pathname);}catch(e){}state.html=null;$('#empty').style.display='flex';$('#loaded').classList.remove('show');$('#preview').srcdoc='';$('#export').disabled=true;$('#exhint').textContent='Drop a file to begin';$('#bar').classList.remove('show');$('#result').classList.remove('show');$('#ractions').classList.remove('show');$('#status').textContent='';}
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 let lastJobId=null;            // the free-preview job (used to checkout)
 
@@ -160,10 +160,23 @@ async function renderClean(jobId,session){
   try{
     const r=await fetch(API+'/api/unlock',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jobId,session})});
     const d=await r.json();if(!r.ok)throw new Error(d.error||'Unlock failed');
+    // Make this render shareable/bookmarkable: the URL now points at the job,
+    // so the user can leave and come back (or send the link) without re-rendering.
+    try{ history.replaceState({},'', '?job='+encodeURIComponent(d.cleanJobId)); }catch(e){}
     const st=await pollJob(d.cleanJobId,'Rendering clean');
     $('#status').textContent=`Clean export ready · ${st.width}×${st.height} · ${st.durationSec}s · ${(st.bytes/1e6).toFixed(1)} MB · no watermark`;
     showVideo(st);$('#ractions').classList.add('show');
   }catch(err){$('#status').textContent='⚠ '+err.message;}
+}
+
+// Resume an existing render from a shared/bookmarked ?job= link.
+async function watchJob(jobId){
+  $('#freebox').style.display='none';$('#bar').classList.add('show');$('#barfill').style.width='8%';$('#status').textContent='Loading your render…';
+  try{
+    const st=await pollJob(jobId,'Rendering');
+    $('#status').textContent=`Clean export ready · ${st.width}×${st.height} · ${st.durationSec}s · ${(st.bytes/1e6).toFixed(1)} MB · no watermark`;
+    showVideo(st);$('#ractions').classList.add('show');
+  }catch(err){$('#status').textContent='⚠ '+err.message+' — this link may have expired.';}
 }
 
 // Step 2: pay to unlock the clean version
@@ -178,13 +191,18 @@ $('#unlock').onclick=async()=>{
   }catch(err){$('#status').textContent='⚠ '+err.message;$('#unlock').disabled=false;}
 };
 
-// Step 3: returning from a real Stripe payment -> render & deliver
+// Copy the current page link (which points at this render) to share/return to.
+$('#copylink').onclick=async()=>{
+  try{ await navigator.clipboard.writeText(location.href); const b=$('#copylink'); b.textContent='Copied!'; setTimeout(()=>b.textContent='Copy link',1500); }catch(e){}
+};
+
+// On load: resume from a Stripe return (?paid) or a shared/bookmarked link (?job).
 (async()=>{
   const q=new URLSearchParams(location.search);
   const paidJob=q.get('paid');
-  if(!paidJob)return;
-  history.replaceState({},'',location.pathname);
-  await renderClean(paidJob,q.get('session'));
+  if(paidJob){ history.replaceState({},'',location.pathname); await renderClean(paidJob,q.get('session')); return; }
+  const jobId=q.get('job');
+  if(jobId){ await watchJob(jobId); }
 })();
 </script>
 </body>
