@@ -298,41 +298,42 @@ async function render(opts) {
   const ffmpegArgs = buildFfmpegArgs({ container: ext, fps, width, height, quality, transparent, watermark, outPath });
   const ffmpegBin = opts.ffmpegPath || process.env.FRAMECAST_FFMPEG || 'ffmpeg';
   const ffmpeg = spawn(ffmpegBin, ffmpegArgs, { stdio: ['pipe', 'inherit', 'inherit'] });
+  let ffmpegErr = null;
+  ffmpeg.stdin.on('error', (e) => { ffmpegErr = ffmpegErr || e; }); // swallow EPIPE if ffmpeg exits
   const ffmpegDone = new Promise((res, rej) => {
-    ffmpeg.on('close', (code) => code === 0 ? res() : rej(new Error('ffmpeg exited ' + code)));
+    ffmpeg.on('close', (code) => code === 0 ? res()
+      : rej(new Error('ffmpeg exited ' + code + ' (filter/codec issue — e.g. drawtext needs full ffmpeg)')));
     ffmpeg.on('error', rej);
   });
+  ffmpegDone.catch(() => {}); // never an "unhandled" rejection (would crash the process)
 
-  for (let i = 0; i < totalFrames; i++) {
-    const t = i * frameMs;
-    await page.evaluate((tt) => {
-      window.__framecast.tick(tt);
-      window.__framecast.seekDeclarative(tt);
-    }, t);
-    // JPEG capture is ~2x faster than PNG (PNG compression is the slow link) and
-    // visually lossless into x264. Transparency needs PNG's alpha, so use PNG
-    // only for transparent output.
-    // IMPORTANT: keep animations:'allow'. 'disabled' makes Playwright reset
-    // infinite CSS animations to their initial state and fast-forward finite
-    // ones, clobbering the exact currentTime we just seeked.
-    const shot = transparent
-      ? { type: 'png', omitBackground: true }
-      : { type: 'jpeg', quality: 90 };
-    const frame = await page.screenshot({
-      ...shot,
-      animations: 'allow',
-      clip: { x: 0, y: 0, width, height },
-    });
-    const ok = ffmpeg.stdin.write(frame);
-    if (!ok) await new Promise((r) => ffmpeg.stdin.once('drain', r));
-    if (i % Math.ceil(fps / 2) === 0 || i === totalFrames - 1) {
-      onProgress({ frame: i + 1, total: totalFrames, pct: Math.round(((i + 1) / totalFrames) * 100) });
+  try {
+    for (let i = 0; i < totalFrames; i++) {
+      if (ffmpegErr || !ffmpeg.stdin.writable) throw new Error('ffmpeg stopped early' + (ffmpegErr ? ': ' + ffmpegErr.message : ' (exit ' + ffmpeg.exitCode + ')'));
+      const t = i * frameMs;
+      await page.evaluate((tt) => {
+        window.__framecast.tick(tt);
+        window.__framecast.seekDeclarative(tt);
+      }, t);
+      // JPEG capture is ~2x faster than PNG and visually lossless into x264.
+      // Transparency needs PNG's alpha, so use PNG only for transparent output.
+      // Keep animations:'allow' — 'disabled' would reset/seek CSS animations,
+      // clobbering the exact currentTime we set.
+      const shot = transparent
+        ? { type: 'png', omitBackground: true }
+        : { type: 'jpeg', quality: 90 };
+      const frame = await page.screenshot({ ...shot, animations: 'allow', clip: { x: 0, y: 0, width, height } });
+      const ok = ffmpeg.stdin.write(frame);
+      if (!ok) await new Promise((r) => ffmpeg.stdin.once('drain', r));
+      if (i % Math.ceil(fps / 2) === 0 || i === totalFrames - 1) {
+        onProgress({ frame: i + 1, total: totalFrames, pct: Math.round(((i + 1) / totalFrames) * 100) });
+      }
     }
+    try { ffmpeg.stdin.end(); } catch (_) {}
+    await ffmpegDone;
+  } finally {
+    try { await browser.close(); } catch (_) {}
   }
-
-  ffmpeg.stdin.end();
-  await ffmpegDone;
-  await browser.close();
 
   const { size } = fs.statSync(outPath);
   return { outPath, durationSec, totalFrames, fps, width, height, bytes: size };

@@ -30,7 +30,21 @@ fs.mkdirSync(WORK, { recursive: true });
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css',
   '.mp4': 'video/mp4', '.webm': 'video/webm', '.gif': 'image/gif', '.json': 'application/json' };
 
-try { const f = require('ffmpeg-static'); if (f) process.env.FRAMECAST_FFMPEG = f; } catch (_) {}
+// Use the full system ffmpeg (has the drawtext filter for watermarks). Only fall
+// back to the stripped-down ffmpeg-static if no system ffmpeg is present (e.g.
+// some local dev machines) — note that fallback can't draw watermarks.
+if (!process.env.FRAMECAST_FFMPEG) {
+  try {
+    require('child_process').execSync('ffmpeg -version', { stdio: 'ignore' });
+    // system ffmpeg available -> render.js defaults to 'ffmpeg'
+  } catch (_) {
+    try { const f = require('ffmpeg-static'); if (f) process.env.FRAMECAST_FFMPEG = f; } catch (_) {}
+  }
+}
+
+// A single failed render must NEVER take down the service. Log and keep serving.
+process.on('unhandledRejection', (e) => console.error('[unhandledRejection]', e && e.message ? e.message : e));
+process.on('uncaughtException', (e) => console.error('[uncaughtException]', e && e.message ? e.message : e));
 
 // Source params kept so a paid unlock can re-render the SAME clip cleanly.
 const sources = new Map();   // jobId -> { params, ts }
