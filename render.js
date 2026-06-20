@@ -282,6 +282,8 @@ async function render(opts) {
   let durationSec = opts.durationSec;
   let clockDirty = false;
   let analysis = null; // { loop, blanks } from the probe — surfaced on the result
+  let durSource = opts.durationSec ? 'requested' : 'default'; // which path set duration
+  let durInfo = null;  // readable-timeline diagnostic numbers (for the log + Phase 2)
   if (!durationSec || opts.autoDetect) {
     const info = await page.evaluate(() => {
       // 1) Explicit author intent wins — the reliable path for held end cards.
@@ -312,13 +314,17 @@ async function render(opts) {
           if (isFinite(td) && td > 0 && td < 36000) gsapMs = td * 1000;
         }
       } catch (e) {}
-      return { declaredMs, max: Math.max(css.max || 0, gsapMs), sawInfinite: css.sawInfinite };
+      return { declaredMs, cssMs: css.max || 0, gsapMs, max: Math.max(css.max || 0, gsapMs), sawInfinite: css.sawInfinite };
     });
+    durInfo = info;
     // Declared duration is authoritative (covers intentional end-card holds).
     if (info.declaredMs > 0) {
       durationSec = Math.min(HARD_CAP_SEC, info.declaredMs / 1000);
+      durSource = 'declared';
     } else if (opts.autoDetect && info.max > 0) {
       durationSec = Math.min(HARD_CAP_SEC, Math.ceil((info.max / 1000) + 0.5));
+      // Which readable timeline won? (GSAP is ignored when infinite — see above.)
+      durSource = (info.gsapMs > 0 && info.gsapMs >= info.cssMs) ? 'gsap' : 'css';
     }
     // No readable timeline (e.g. bundled GSAP)? Probe for motion + loop + blanks.
     if (opts.autoDetect && !durationSec) {
@@ -328,15 +334,27 @@ async function render(opts) {
       // the 75s cap. This is the fix for looping ads over-detecting to 1:15.
       if (probe.loop && probe.loop.detected && probe.loop.confidence >= 0.6) {
         durationSec = Math.min(HARD_CAP_SEC, Math.max(3, probe.loop.periodSec));
-        console.log(`[framecast] loop detected: ${probe.loop.periodSec}s ×${probe.loop.cycles} (conf ${probe.loop.confidence}) -> rendering one cycle`);
+        durSource = 'loop';
       } else if (probe.settleSec > 0) {
         durationSec = probe.settleSec; // motion-settle fallback (previous behavior)
+        durSource = 'settle';
       }
       clockDirty = true; // the probe advanced the virtual clock + animation state
     }
   }
   if (!durationSec) durationSec = 15;              // sensible default
   durationSec = Math.min(durationSec, HARD_CAP_SEC); // enforce 1:15 ceiling
+
+  // One diagnostic line per render: which path decided the duration, plus the raw
+  // timeline numbers. Makes it visible in Render logs whether 'loop', 'css',
+  // 'gsap', etc. won — and feeds the Phase 2 detect-and-confirm card.
+  {
+    const lp = analysis && analysis.loop;
+    const s = (ms) => ((ms || 0) / 1000).toFixed(1) + 's';
+    console.log(`[framecast] duration=${durationSec}s source=${durSource}`
+      + (durInfo ? ` | declared=${s(durInfo.declaredMs)} css=${s(durInfo.cssMs)} gsap=${s(durInfo.gsapMs)}${durInfo.sawInfinite ? ' css∞' : ''}` : '')
+      + (lp ? ` | loop=${lp.detected ? lp.periodSec + 's ×' + lp.cycles + ' conf' + lp.confidence : 'none'}` : ''));
+  }
 
   // The probe ran the animation forward to find its end, leaving JS state (GSAP,
   // canvas) at that time. Reload so the real render starts from a clean t=0.
@@ -418,7 +436,7 @@ async function render(opts) {
 
   const { size } = fs.statSync(outPath);
   return { outPath, durationSec, totalFrames, fps, width, height, bytes: size,
-    loop: analysis ? analysis.loop : null, blanks: analysis ? analysis.blanks : null };
+    durSource, durInfo, loop: analysis ? analysis.loop : null, blanks: analysis ? analysis.blanks : null };
 }
 
 // run ffmpeg with args, resolve on success.
