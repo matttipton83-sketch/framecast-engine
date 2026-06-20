@@ -553,6 +553,17 @@ $('#copylink').onclick=async()=>{
   if(paidJob){ history.replaceState({},'',location.pathname); await renderClean(paidJob,q.get('session')); return; }
   const jobId=q.get('job');
   if(jobId){ await watchJob(jobId); return; }
+  // File handed off from the landing page. Primary path: a stash id fetched from
+  // the engine (works across the framecastvideo.com → app.framecastvideo.com
+  // subdomain boundary, where sessionStorage can't reach).
+  const pend=q.get('pending');
+  if(pend){
+    try{
+      const r=await fetch(API+'/api/stash/'+encodeURIComponent(pend));
+      if(r.ok){ const j=await r.json(); if(j&&j.html){ history.replaceState({},'',location.pathname); hydrate(j.html,(j.name||'animation')+'.html'); return; } }
+    }catch(e){}
+  }
+  // Fallback: same-origin sessionStorage (used only if the stash relay failed).
   try{
     const ph=sessionStorage.getItem('fc_pending_html');
     if(ph){ const pn=sessionStorage.getItem('fc_pending_name'); sessionStorage.removeItem('fc_pending_html'); sessionStorage.removeItem('fc_pending_name'); hydrate(ph,(pn||'animation')+'.html'); }

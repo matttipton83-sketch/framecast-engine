@@ -49,7 +49,13 @@ process.on('uncaughtException', (e) => console.error('[uncaughtException]', e &&
 // Source params kept so a paid unlock can re-render the SAME clip cleanly.
 const sources = new Map();   // jobId -> { params, ts }
 const paid = new Map();      // jobId -> true (payment confirmed)
+// Cross-subdomain handoff: the landing (framecastvideo.com) can't pass a file to
+// the studio (app.framecastvideo.com) via sessionStorage — different origins. So
+// the landing stashes the HTML here and the studio fetches it back by id.
+const stash = new Map();     // id -> { html, name, ts }
+const STASH_TTL = 1000 * 60 * 30; // 30 min is plenty to land + render
 setInterval(() => { const now = Date.now(); for (const [k, v] of sources) if (now - v.ts > SOURCE_TTL) sources.delete(k); }, 60000).unref?.();
+setInterval(() => { const now = Date.now(); for (const [k, v] of stash) if (now - v.ts > STASH_TTL) stash.delete(k); }, 60000).unref?.();
 
 function runRender(job, onProgress) {
   const { html, name, preset, quality, durationSec, watermark, maxHeight } = job.payload;
@@ -166,6 +172,24 @@ const server = http.createServer((req, res) => {
 
   // CORS preflight for cross-origin UIs (e.g. the Netlify-hosted front-end).
   if (req.method === 'OPTIONS') { cors(res); res.writeHead(204); return res.end(); }
+
+  // Handoff: landing stashes an uploaded HTML file, studio fetches it by id.
+  if (req.method === 'POST' && url.pathname === '/api/stash') {
+    return readBody(req, (body) => {
+      if (body === null) return sendJSON(res, 413, { error: 'File too large' });
+      let o; try { o = JSON.parse(body); } catch { return sendJSON(res, 400, { error: 'Bad JSON' }); }
+      if (!o.html || typeof o.html !== 'string') return sendJSON(res, 400, { error: 'Missing html' });
+      const id = Math.random().toString(36).slice(2, 12) + Date.now().toString(36);
+      stash.set(id, { html: o.html, name: String(o.name || 'animation').slice(0, 80), ts: Date.now() });
+      sendJSON(res, 200, { id });
+    });
+  }
+  if (req.method === 'GET' && url.pathname.startsWith('/api/stash/')) {
+    const id = url.pathname.split('/').pop();
+    const s = stash.get(id);
+    if (!s) return sendJSON(res, 404, { error: 'Handoff expired — drop the file again' });
+    return sendJSON(res, 200, { html: s.html, name: s.name });
+  }
 
   // 1) Free preview render
   if (req.method === 'POST' && url.pathname === '/api/jobs') {
