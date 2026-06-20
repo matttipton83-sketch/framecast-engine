@@ -172,6 +172,36 @@
   @media(max-width:560px){.plans{grid-template-columns:1fr}}
   #confetti{position:fixed;inset:0;z-index:90;pointer-events:none;display:none}
 
+  /* render progress modal */
+  #renderModal{position:fixed;inset:0;z-index:88;display:none;align-items:center;justify-content:center;padding:24px;background:rgba(4,5,12,.8);backdrop-filter:blur(10px)}
+  #renderModal.show{display:flex}
+  .rsheet{position:relative;width:100%;max-width:440px;text-align:center;background:rgba(20,22,36,.94);border:1px solid var(--line2);border-radius:24px;padding:34px 30px 28px;box-shadow:0 50px 130px rgba(0,0,0,.7);animation:rmpop .4s cubic-bezier(.2,.9,.25,1) both}
+  @keyframes rmpop{from{opacity:0;transform:translateY(16px) scale(.96)}to{opacity:1;transform:none}}
+  .rmlogo{width:74px;height:74px;margin:0 auto 6px;position:relative}
+  .rmlogo .mk{position:absolute;inset:0;animation:rmfloat 2.4s ease-in-out infinite}
+  @keyframes rmfloat{0%,100%{transform:translateY(0) rotate(-3deg)}50%{transform:translateY(-7px) rotate(3deg)}}
+  .rmlogo::after{content:"";position:absolute;left:50%;top:50%;width:120px;height:120px;transform:translate(-50%,-50%);border-radius:50%;background:radial-gradient(circle,rgba(124,140,255,.32),transparent 65%);animation:rmpulse 2.4s ease-in-out infinite;z-index:-1}
+  @keyframes rmpulse{0%,100%{opacity:.45;transform:translate(-50%,-50%) scale(.9)}50%{opacity:.9;transform:translate(-50%,-50%) scale(1.12)}}
+  .rmtitle{font-size:20px;font-weight:800;letter-spacing:-.02em;margin-top:8px}
+  .rmsub{color:var(--muted);font-size:13.5px;margin-top:7px;min-height:38px;line-height:1.45;transition:opacity .3s}
+  .rmstages{display:flex;justify-content:center;gap:7px;margin:18px 0 16px}
+  .rmstage{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:700;letter-spacing:.3px;color:var(--muted2);padding:6px 11px;border-radius:999px;border:1px solid var(--line);background:var(--panel);transition:.3s}
+  .rmstage .pd{width:7px;height:7px;border-radius:50%;background:var(--muted2);transition:.3s}
+  .rmstage.active{color:var(--ink);border-color:transparent;box-shadow:0 0 0 1.5px var(--accent);background:rgba(124,140,255,.12)}
+  .rmstage.active .pd{background:var(--accent);box-shadow:0 0 10px var(--accent);animation:rmblink 1s ease-in-out infinite}
+  .rmstage.done{color:var(--accent2);border-color:transparent;background:rgba(94,224,192,.1)}
+  .rmstage.done .pd{background:var(--accent2)}
+  @keyframes rmblink{0%,100%{opacity:1}50%{opacity:.35}}
+  .rmbar{height:12px;background:rgba(255,255,255,.07);border:1px solid var(--line);border-radius:999px;overflow:hidden;position:relative}
+  .rmbar i{display:block;height:100%;width:0;border-radius:999px;background:linear-gradient(90deg,var(--accent),var(--accent2),var(--accent));background-size:200% 100%;animation:encshim 1.2s linear infinite;transition:width .5s cubic-bezier(.3,.8,.3,1)}
+  .rmbar.glow i{box-shadow:0 0 16px rgba(124,140,255,.7)}
+  .rmmeta{display:flex;justify-content:space-between;align-items:center;margin-top:11px;font-size:12px;color:var(--muted2);font-variant-numeric:tabular-nums}
+  .rmpct{font-weight:800;color:var(--ink);font-size:13px}
+  .rmtimer{font-variant-numeric:tabular-nums}
+  .rmfoot{color:var(--muted2);font-size:11px;margin-top:16px}
+  .rmdots::after{content:"";animation:rmdots 1.4s steps(4,end) infinite}
+  @keyframes rmdots{0%{content:""}25%{content:"."}50%{content:".."}75%{content:"..."}}
+
   @keyframes rise{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:none}}
   .lift{animation:rise .8s cubic-bezier(.2,.8,.2,1) both}
   @media(max-width:840px){.grid{grid-template-columns:1fr}}
@@ -288,6 +318,22 @@
     </div>
   </div>
 
+  <div id="renderModal">
+    <div class="rsheet">
+      <div class="rmlogo"><span class="mk" data-logo="full"></span></div>
+      <div class="rmtitle" id="rmTitle">Rendering your video</div>
+      <div class="rmsub" id="rmSub">Warming up the engine…</div>
+      <div class="rmstages">
+        <div class="rmstage" id="rmS1"><span class="pd"></span>CAPTURE</div>
+        <div class="rmstage" id="rmS2"><span class="pd"></span>ENCODE</div>
+        <div class="rmstage" id="rmS3"><span class="pd"></span>POLISH</div>
+      </div>
+      <div class="rmbar" id="rmBar"><i id="rmFill"></i></div>
+      <div class="rmmeta"><span class="rmpct" id="rmPct">0%</span><span class="rmtimer" id="rmTimer">0:00</span></div>
+      <div class="rmfoot">Frame-perfect capture · no watermark · keep this tab open</div>
+    </div>
+  </div>
+
   <svg width="0" height="0" style="position:absolute"><defs><linearGradient id="ig" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#8b9dff"/><stop offset=".5" stop-color="#b388ff"/><stop offset="1" stop-color="#5ee0c0"/></linearGradient></defs></svg>
 
 <script>
@@ -317,6 +363,55 @@ function burst(){
   var t0=performance.now();
   (function f(now){ctx.clearRect(0,0,cv.width,cv.height);var live=false;P.forEach(function(p){p.vy+=p.g;p.x+=p.vx;p.y+=p.vy;p.r+=p.vr;p.a-=.006;if(p.a>0&&p.y<cv.height+30){live=true;ctx.save();ctx.globalAlpha=Math.max(0,p.a);ctx.translate(p.x,p.y);ctx.rotate(p.r);ctx.fillStyle=p.c;ctx.fillRect(-p.s/2,-p.s/2,p.s,p.s*.62);ctx.restore();}});if(live&&now-t0<4200)requestAnimationFrame(f);else cv.style.display='none';})(t0);
 }
+
+/* ---- render progress modal (keeps motion alive through the slow encode) ---- */
+const RM=(function(){
+  let open=false,raf=0,t0=0,phase='idle',capFrac=0,encT0=0,displayed=0,target=0,msgs=[],msgI=0,msgT=0;
+  const g=id=>document.getElementById(id);
+  const QUEUE_MSGS=['Warming up the engine…','Spinning up a fresh render…','Getting everything in place…'];
+  const CAP_MSGS=['Capturing every frame at full quality…','Taking pixel-perfect snapshots…','Painting each frame, one by one…'];
+  const ENC_MSGS=['Stitching your frames into silky video…','Encoding in crisp, clean H.264…','Compressing without losing a single detail…','Color-checking every frame…','Sealing the master — almost there…','This is the heavy lifting, hang tight…'];
+  function fmt(s){s=Math.max(0,Math.floor(s));return Math.floor(s/60)+':'+String(s%60).padStart(2,'0');}
+  function setStages(p){
+    const a=g('rmS1'),b=g('rmS2'),c=g('rmS3');[a,b,c].forEach(s=>s.className='rmstage');
+    if(p==='capture'){a.classList.add('active');}
+    else if(p==='encode'){a.classList.add('done');b.classList.add('active');}
+    else if(p==='done'){a.classList.add('done');b.classList.add('done');c.classList.add('done');}
+  }
+  function tick(now){
+    g('rmTimer').textContent=fmt((now-t0)/1000);
+    if(phase==='queue')target=5;
+    else if(phase==='capture')target=8+capFrac*58;
+    else if(phase==='encode'){const e=(now-encT0)/1000;target=66+30*(1-Math.exp(-e/16));}
+    else if(phase==='done')target=100;
+    if(target>displayed)displayed+=Math.max(0.15,(target-displayed)*0.12);
+    if(displayed>100)displayed=100;
+    g('rmFill').style.width=displayed.toFixed(1)+'%';g('rmPct').textContent=Math.round(displayed)+'%';
+    if(msgs.length&&now-msgT>3200){msgI=(msgI+1)%msgs.length;g('rmSub').textContent=msgs[msgI];msgT=now;}
+    if(open)raf=requestAnimationFrame(tick);
+  }
+  function start(title){
+    open=true;phase='queue';capFrac=0;displayed=0;target=5;t0=performance.now();msgT=t0;msgs=QUEUE_MSGS;msgI=0;
+    g('rmTitle').textContent=title||'Rendering your video';g('rmSub').textContent=msgs[0];setStages('queue');
+    g('rmFill').style.width='0%';g('rmPct').textContent='0%';g('rmTimer').textContent='0:00';g('rmBar').classList.remove('glow');
+    g('renderModal').classList.add('show');cancelAnimationFrame(raf);raf=requestAnimationFrame(tick);
+  }
+  function capture(frame,total){
+    if(phase!=='capture'){phase='capture';setStages('capture');msgs=CAP_MSGS;msgI=0;g('rmSub').textContent=msgs[0];msgT=performance.now();}
+    if(total){capFrac=Math.min(1,frame/total);g('rmTitle').textContent='Capturing frame '+frame+' of '+total;}
+  }
+  function encode(){
+    if(phase!=='encode'){phase='encode';encT0=performance.now();setStages('encode');msgs=ENC_MSGS;msgI=0;g('rmSub').textContent=msgs[0];msgT=encT0;g('rmTitle').textContent='Encoding your clean video';g('rmBar').classList.add('glow');}
+  }
+  function done(cb){
+    phase='done';setStages('done');g('rmTitle').textContent='Done! ✨';g('rmSub').textContent='Your clean, watermark-free video is ready.';
+    setTimeout(()=>{g('rmFill').style.width='100%';g('rmPct').textContent='100%';},80);
+    setTimeout(()=>{close();if(cb)cb();},1150);
+  }
+  function fail(msg){phase='idle';g('rmTitle').textContent='Render hit a snag';g('rmSub').textContent=msg||'Please try again.';setStages('queue');setTimeout(close,1700);}
+  function close(){open=false;cancelAnimationFrame(raf);g('renderModal').classList.remove('show');}
+  return {start,capture,encode,done,fail,close};
+})();
 
 /* ---- studio logic ---- */
 const FORMATS=[
@@ -370,7 +465,7 @@ async function pollJob(id,verb){
     try{ const r=await fetch(API+'/api/jobs/'+id); const txt=await r.text(); st=JSON.parse(txt); }
     catch(e){ if(++fails>25) throw new Error('Lost connection to the engine — please try again.'); $('#status').textContent=verb+'… (engine busy)'; continue; }
     if(st.status==='queued'){fails=0;$('#status').textContent='Queued'+(st.position>1?` (position ${st.position})`:'…');$('#barfill').style.width='6%';}
-    else if(st.status==='rendering'){fails=0;const enc=st.total&&st.frame>=st.total;if(enc){$('#bar').classList.add('enc');$('#barfill').style.width='100%';$('#status').textContent='Master captured ✓ — encoding your video now… hang tight, this part can take a minute.';}else{$('#bar').classList.remove('enc');$('#barfill').style.width=Math.max(8,st.pct||0)+'%';$('#status').textContent=st.total?`${verb} frame ${st.frame} of ${st.total} — every frame perfect.`:verb+'…';}}
+    else if(st.status==='rendering'){fails=0;const enc=st.total&&st.frame>=st.total;if(enc){RM.encode();$('#bar').classList.add('enc');$('#barfill').style.width='100%';$('#status').textContent='Encoding your clean video…';}else{RM.capture(st.frame||0,st.total||0);$('#bar').classList.remove('enc');$('#barfill').style.width=Math.max(8,st.pct||0)+'%';$('#status').textContent=st.total?`${verb} frame ${st.frame} of ${st.total} — every frame perfect.`:verb+'…';}}
     else if(st.status==='done'){$('#bar').classList.remove('enc');$('#barfill').style.width='100%';return st;}
     else if(st.status==='error'){throw new Error(st.error||'Render failed');}
     else { if(++fails>25) throw new Error(st.error||'Render failed'); }
@@ -389,33 +484,33 @@ $('#export').onclick=async()=>{
   if(!state.html)return;
   $('#export').disabled=true;$('#bar').classList.add('show');$('#barfill').style.width='4%';
   $('#result').classList.remove('show');$('#kit').classList.remove('show');$('#ractions').classList.remove('show');$('#freebox').style.display='none';$('#status').textContent='Submitting…';
+  RM.start('Rendering your preview');
   try{
     const j=await jfetch(API+'/api/jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({html:state.html,name:state.fname,preset:state.preset,durationSec:state.dur||undefined})});
     lastJobId=j.jobId;if(j.price)$('#price').textContent=j.price;
     const st=await pollJob(lastJobId,'Capturing');
-    $('#status').textContent=`${st.durationSec}s teaser ready · ${st.width}×${st.height} — unlock the full clip below`;
-    showVideo(st);$('#freebox').style.display='block';
-  }catch(err){$('#status').textContent='⚠ '+err.message;}
+    RM.done(()=>{ $('#status').textContent=`${st.durationSec}s teaser ready · ${st.width}×${st.height} — unlock the full clip below`; showVideo(st);$('#freebox').style.display='block'; });
+  }catch(err){RM.fail(err.message);$('#status').textContent='⚠ '+err.message;}
   $('#export').disabled=false;
 };
 async function renderClean(jobId,session){
   $('#freebox').style.display='none';$('#bar').classList.add('show');$('#barfill').style.width='8%';
+  RM.start('Rendering your clean video');
   $('#status').textContent='Payment received — rendering your clean video…';
   try{
     const d=await jfetch(API+'/api/unlock',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jobId,session})});
     try{ history.replaceState({},'', '?job='+encodeURIComponent(d.cleanJobId)); }catch(e){}
     const st=await pollJob(d.cleanJobId,'Rendering your kit');
-    $('#status').textContent=showResult(st);
-    $('#ractions').classList.add('show');
-  }catch(err){$('#status').textContent='⚠ '+err.message;}
+    RM.done(()=>{ $('#status').textContent=showResult(st); $('#ractions').classList.add('show'); });
+  }catch(err){RM.fail(err.message);$('#status').textContent='⚠ '+err.message;}
 }
 async function watchJob(jobId){
   $('#freebox').style.display='none';$('#bar').classList.add('show');$('#barfill').style.width='8%';$('#status').textContent='Loading your render…';
+  RM.start('Rendering your video');
   try{
     const st=await pollJob(jobId,'Rendering');
-    $('#status').textContent=showResult(st);
-    $('#ractions').classList.add('show');
-  }catch(err){$('#status').textContent='⚠ '+err.message+' — this link may have expired.';}
+    RM.done(()=>{ $('#status').textContent=showResult(st); $('#ractions').classList.add('show'); });
+  }catch(err){RM.fail(err.message);$('#status').textContent='⚠ '+err.message+' — this link may have expired.';}
 }
 async function doUnlock(plan){
   $('#payModal').classList.remove('show');
@@ -442,10 +537,10 @@ async function proUnlockEmail(email){
   try{
     const d=await jfetch(API+'/api/unlock',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jobId:lastJobId,email})});
     try{ history.replaceState({},'', '?job='+encodeURIComponent(d.cleanJobId)); }catch(e){}
+    RM.start('Rendering your clean video');
     const st=await pollJob(d.cleanJobId,'Rendering your kit');
-    $('#status').textContent=showResult(st);
-    $('#ractions').classList.add('show');
-  }catch(err){ const m=err.message||''; $('#status').textContent='⚠ '+(/required|verified/i.test(m)?'No active Pro subscription found for that email.':m); }
+    RM.done(()=>{ $('#status').textContent=showResult(st); $('#ractions').classList.add('show'); });
+  }catch(err){ const m=err.message||''; RM.fail(/required|verified/i.test(m)?'No active Pro subscription found for that email.':m); $('#status').textContent='⚠ '+(/required|verified/i.test(m)?'No active Pro subscription found for that email.':m); }
 }
 $('#copylink').onclick=async()=>{
   try{ await navigator.clipboard.writeText(location.href); const b=$('#copylink'); b.textContent='Copied!'; setTimeout(()=>b.textContent='Copy link',1500); }catch(e){}
