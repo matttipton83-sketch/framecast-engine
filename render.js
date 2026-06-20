@@ -321,13 +321,22 @@ async function render(opts) {
   let cdp = null;
   if (!transparent) { try { cdp = await page.context().newCDPSession(page); } catch (_) { cdp = null; } }
   const clip = { x: 0, y: 0, width, height, scale: 1 };
-  async function grab() {
-    if (cdp) {
-      const { data } = await cdp.send('Page.captureScreenshot', { format: 'jpeg', quality: 90, clip, captureBeyondViewport: false });
-      return Buffer.from(data, 'base64');
-    }
+  function shotPW() {
     const shot = transparent ? { type: 'png', omitBackground: true } : { type: 'jpeg', quality: 90 };
     return page.screenshot({ ...shot, animations: 'allow', clip: { x: 0, y: 0, width, height } });
+  }
+  async function grab() {
+    if (cdp) {
+      try {
+        const { data } = await cdp.send('Page.captureScreenshot', { format: 'jpeg', quality: 90, clip, captureBeyondViewport: false });
+        return Buffer.from(data, 'base64');
+      } catch (e) {
+        // Any CDP incompatibility -> permanently fall back to the proven path.
+        cdp = null;
+        return shotPW();
+      }
+    }
+    return shotPW();
   }
 
   try {
