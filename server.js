@@ -17,7 +17,7 @@ const os = require('os');
 const { render, renderKit } = require('./render');
 const { JobQueue } = require('./queue');
 const { tierOpts, PRICING } = require('./tiers');
-const { createCheckout, verifyPaid, hasActiveSubscription, LIVE } = require('./payments');
+const { createCheckout, verifyPaid, hasActiveSubscription, verifyWebhook, LIVE } = require('./payments');
 
 const PORT = process.env.PORT || 8080;
 const PUBLIC = __dirname; // flat layout: index.html sits beside server.js
@@ -193,6 +193,25 @@ const server = http.createServer((req, res) => {
       try { const c = await createCheckout({ jobId: o.jobId, baseUrl, returnTo, plan: o.plan }); sendJSON(res, 200, { url: c.url, live: LIVE }); }
       catch (e) { sendJSON(res, 500, { error: e.message }); }
     });
+  }
+
+  // Stripe webhook — records the payment server-side even if the buyer's browser
+  // never makes it back from the redirect. Needs the RAW body for signature check.
+  if (req.method === 'POST' && url.pathname === '/api/stripe-webhook') {
+    const chunks = [];
+    req.on('data', (c) => chunks.push(c));
+    req.on('end', () => {
+      let event;
+      try { event = verifyWebhook(Buffer.concat(chunks), req.headers['stripe-signature']); }
+      catch (e) { return sendJSON(res, 400, { error: `Webhook signature failed: ${e.message}` }); }
+      if (event && event.type === 'checkout.session.completed') {
+        const s = event.data.object;
+        const jobId = s && s.metadata && s.metadata.jobId;
+        if (jobId) paid.set(jobId, true);
+      }
+      sendJSON(res, 200, { received: true });
+    });
+    return;
   }
 
   // dev-only fake checkout page

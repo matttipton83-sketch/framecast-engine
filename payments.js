@@ -15,6 +15,7 @@ if (KEY) {
   catch (_) { console.warn('stripe key set but `stripe` package not installed — falling back to dev mode'); }
 }
 const LIVE = !!stripe;
+const WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
 
 async function createCheckout({ jobId, baseUrl, returnTo, plan }) {
   const rt = returnTo || baseUrl;   // where to send the user back (the UI origin)
@@ -85,4 +86,11 @@ async function hasActiveSubscription(email) {
   return false;
 }
 
-module.exports = { createCheckout, verifyPaid, hasActiveSubscription, LIVE, PRICING };
+// Verify a Stripe webhook signature and return the event (or null if not configured).
+// Lets us record a payment server-side even if the buyer's browser misses the redirect.
+function verifyWebhook(rawBody, signature) {
+  if (!LIVE || !WEBHOOK_SECRET) return null;
+  return stripe.webhooks.constructEvent(rawBody, signature, WEBHOOK_SECRET);
+}
+
+module.exports = { createCheckout, verifyPaid, hasActiveSubscription, verifyWebhook, LIVE, PRICING };
