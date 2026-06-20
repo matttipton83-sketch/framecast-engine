@@ -248,6 +248,7 @@
 
         <div class="col">
           <div class="label"><span class="n">02</span> PICK A FORMAT</div>
+          <div id="detect" style="display:none;margin:0 0 14px;padding:12px 14px;border:1px solid rgba(140,160,255,.28);border-radius:12px;background:rgba(140,160,255,.07);font-size:.95rem;line-height:1.45"></div>
           <div class="formats" id="formats"></div>
 
           <div class="ctl-row"><label>Length</label><span class="val grad" id="durval">Auto</span></div>
@@ -438,11 +439,39 @@ drop.addEventListener('drop',e=>{const f=e.dataTransfer.files[0];if(f)loadFile(f
 fileInput.onchange=e=>{const f=e.target.files[0];if(f)loadFile(f);};
 $('#clear').onclick=e=>{e.stopPropagation();reset();};
 $('#again').onclick=reset;
-function hydrate(html,name){state.html=html;state.fname=(name||'animation').replace(/\.[^.]+$/,'');$('#fname').textContent=(state.fname)+'.html';$('#empty').classList.add('hide');$('#loaded').classList.add('show');$('#preview').srcdoc=html;$('#export').disabled=false;$('#exhint').textContent='Ready — choose a format and export';}
+function hydrate(html,name){state.html=html;state.fname=(name||'animation').replace(/\.[^.]+$/,'');$('#fname').textContent=(state.fname)+'.html';$('#empty').classList.add('hide');$('#loaded').classList.add('show');$('#preview').srcdoc=html;$('#export').disabled=false;$('#exhint').textContent='Analyzing your animation…';analyzeFile();}
 function loadFile(f){const r=new FileReader();r.onload=()=>hydrate(r.result,f.name);r.readAsText(f);}
-function reset(){try{history.replaceState({},'',location.pathname);}catch(e){}state.html=null;$('#empty').classList.remove('hide');$('#loaded').classList.remove('show');$('#preview').srcdoc='';$('#export').disabled=true;$('#exhint').textContent='Drop a file to begin';$('#bar').classList.remove('show');$('#result').classList.remove('show');$('#kit').classList.remove('show');$('#ractions').classList.remove('show');$('#status').textContent='';}
+function reset(){try{history.replaceState({},'',location.pathname);}catch(e){}state.html=null;analyzeSeq++;var _dc=$('#detect');if(_dc){_dc.style.display='none';_dc.innerHTML='';}$('#empty').classList.remove('hide');$('#loaded').classList.remove('show');$('#preview').srcdoc='';$('#export').disabled=true;$('#exhint').textContent='Drop a file to begin';$('#bar').classList.remove('show');$('#result').classList.remove('show');$('#kit').classList.remove('show');$('#ractions').classList.remove('show');$('#status').textContent='';}
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 let lastJobId=null;
+/* ---- detect-and-confirm: analyze the dropped file, pre-fill format + length ---- */
+let analyzeSeq=0;
+function applyDetected(d){
+  const idx=FORMATS.findIndex(f=>f.id===d.preset);
+  if(idx>=0){state.preset=d.preset;const fmts=document.querySelectorAll('.fmt');fmts.forEach(x=>x.classList.remove('sel'));if(fmts[idx])fmts[idx].classList.add('sel');}
+  if(d.durationSec>0){state.dur=Math.min(75,Math.round(d.durationSec));$('#dur').value=state.dur;$('#durval').textContent=state.dur+'s';}
+  const looping=d.loop&&d.loop.detected;
+  const why=({declared:'length set in your file',css:'from your animation timeline',gsap:'from your animation timeline',loop:'detected a loop — one clean cycle',settle:'measured when motion stops',default:'best guess'})[d.durSource]||'auto-detected';
+  const c=$('#detect');c.style.display='block';
+  c.innerHTML='<div style="font-weight:700;margin-bottom:3px">✓ Here’s what we found</div>'
+    +'<div style="opacity:.92">Format <b>'+(d.label||d.preset)+'</b> &middot; Length <b>'+state.dur+'s</b>'
+    +(looping?' <span style="opacity:.8">&middot; looping ad (one clean cycle)</span>':'')+'</div>'
+    +'<div style="opacity:.6;font-size:.86em;margin-top:5px">Filled in below from your file ('+why+'). Change anything, then export.</div>';
+  $('#exhint').textContent='Detected '+(d.label||d.preset)+' · '+state.dur+'s — export when ready';
+}
+async function analyzeFile(){
+  const myseq=++analyzeSeq;const html=state.html;if(!html)return;
+  const c=$('#detect');c.style.display='block';c.innerHTML='<div style="opacity:.85">Analyzing your animation… detecting format &amp; length</div>';
+  try{
+    const start=await fetch(API+'/api/analyze',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({html:html,name:state.fname})}).then(r=>r.json());
+    if(!start||!start.jobId)throw 0;
+    let st,tries=0;
+    while(tries++<90){await sleep(1000);if(myseq!==analyzeSeq)return;try{st=await fetch(API+'/api/jobs/'+start.jobId).then(r=>r.json());}catch(e){continue;}if(st.status==='done'||st.status==='error')break;}
+    if(myseq!==analyzeSeq)return;
+    if(st&&st.status==='done'&&st.durationSec){applyDetected(st);}
+    else{c.style.display='none';if(($('#exhint').textContent||'').indexOf('Analyzing')>=0)$('#exhint').textContent='Ready — choose a format and export';}
+  }catch(e){if(myseq===analyzeSeq){c.style.display='none';$('#exhint').textContent='Ready — choose a format and export';}}
+}
 
 async function jfetch(url,opts,tries=3){
   let lastErr;

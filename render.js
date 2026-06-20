@@ -333,7 +333,7 @@ async function render(opts) {
       // A confident LOOP -> render exactly ONE clean cycle instead of running to
       // the 75s cap. This is the fix for looping ads over-detecting to 1:15.
       if (probe.loop && probe.loop.detected && probe.loop.confidence >= 0.6) {
-        durationSec = Math.min(HARD_CAP_SEC, Math.max(3, probe.loop.periodSec));
+        durationSec = Math.min(HARD_CAP_SEC, Math.max(1, probe.loop.periodSec));
         durSource = 'loop';
       } else if (probe.settleSec > 0) {
         durationSec = probe.settleSec; // motion-settle fallback (previous behavior)
@@ -568,7 +568,7 @@ async function analyze(opts) {
     if (!durationSec) {
       const probe = await analyzeProbe(page, { capSec: HARD_CAP_SEC });
       loop = probe.loop; blanks = probe.blanks;
-      if (probe.loop && probe.loop.detected && probe.loop.confidence >= 0.6) { durationSec = Math.min(HARD_CAP_SEC, Math.max(3, probe.loop.periodSec)); durSource = 'loop'; }
+      if (probe.loop && probe.loop.detected && probe.loop.confidence >= 0.6) { durationSec = Math.min(HARD_CAP_SEC, Math.max(1, probe.loop.periodSec)); durSource = 'loop'; }
       else if (probe.settleSec > 0) { durationSec = probe.settleSec; durSource = 'settle'; }
     }
     if (!durationSec) { durationSec = 15; durSource = 'default'; }
