@@ -35,11 +35,17 @@ const PRESETS = {
 };
 
 // Quality -> CRF (lower = higher quality / bigger file). Tuned per container.
+// NOTE: at a fixed CRF, x264 presets give ~identical visual quality — slower
+// presets only shrink the file. We're not bandwidth-bound here, so we favor
+// FAST presets: 'medium' is ~2-3x faster than 'slow' with no visible loss.
 const QUALITY = {
-  high:     { crf: 16, preset: 'slow'     },
-  balanced: { crf: 19, preset: 'medium'   },
-  small:    { crf: 23, preset: 'medium'   },
+  high:     { crf: 17, preset: 'medium'   },
+  balanced: { crf: 20, preset: 'fast'     },
+  small:    { crf: 23, preset: 'veryfast' },
   preview:  { crf: 28, preset: 'veryfast' }, // free teaser: fastest encode, frees CPU
+  // Throwaway master for the kit: near-lossless so the 3 derived encodes don't
+  // compound artifacts, but encoded as fast as possible since it's deleted after.
+  intermediate: { crf: 14, preset: 'ultrafast' },
 };
 
 module.exports = { PRESETS, QUALITY };

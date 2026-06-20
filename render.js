@@ -15,7 +15,12 @@ const fs = require('fs');
 const { PRESETS, QUALITY } = require('./presets');
 const virtualTimeScript = require('./virtual-time');
 
-const HARD_CAP_SEC = 75; // product ceiling: 1:15
+const HARD_CAP_SEC = 75;          // product ceiling: 1:15
+// When an animation has NO readable timeline and just keeps moving forever
+// (loops / continuous motion), there's no natural end — capturing the full 75s
+// is slow and almost never what the user wanted. Default such clips to a short,
+// shareable length; the user can always drag the Length slider up to 1:15.
+const CONTINUOUS_DEFAULT_SEC = 20;
 
 // Recursively find the first .ttf/.otf under a directory (last-resort fallback).
 function scanForFont(dir, depth = 0) {
@@ -269,7 +274,9 @@ async function render(opts) {
     // No readable timeline (e.g. bundled GSAP)? Probe for when motion stops.
     if (opts.autoDetect && !durationSec) {
       const probed = await detectDurationSec(page, { capSec: HARD_CAP_SEC });
-      if (probed > 0) durationSec = probed;
+      // If motion runs all the way to the cap, it never settled -> treat as
+      // endless and use the short default instead of a full 75s capture.
+      if (probed > 0) durationSec = probed >= HARD_CAP_SEC - 1.5 ? CONTINUOUS_DEFAULT_SEC : probed;
       clockDirty = true; // the probe advanced the virtual clock + animation state
     }
   }
@@ -307,22 +314,44 @@ async function render(opts) {
   });
   ffmpegDone.catch(() => {}); // never an "unhandled" rejection (would crash the process)
 
+  // Capture via the raw DevTools protocol — skips Playwright's per-screenshot
+  // overhead (stability checks, marshalling), a meaningful per-frame win over
+  // thousands of frames. Falls back to page.screenshot for transparent output
+  // (alpha needs PNG + omitBackground, cleanest through Playwright).
+  let cdp = null;
+  if (!transparent) { try { cdp = await page.context().newCDPSession(page); } catch (_) { cdp = null; } }
+  const clip = { x: 0, y: 0, width, height, scale: 1 };
+  async function grab() {
+    if (cdp) {
+      const { data } = await cdp.send('Page.captureScreenshot', { format: 'jpeg', quality: 90, clip, captureBeyondViewport: false });
+      return Buffer.from(data, 'base64');
+    }
+    const shot = transparent ? { type: 'png', omitBackground: true } : { type: 'jpeg', quality: 90 };
+    return page.screenshot({ ...shot, animations: 'allow', clip: { x: 0, y: 0, width, height } });
+  }
+
   try {
+    // Warm-up: Chrome's compositor goes stale between page-load and the first
+    // capture, so the first frames come out blank/half-rendered — that's the
+    // "beginning gets cut off" bug. Pin the clock at t=0, force a reflow, and
+    // discard a couple of priming frames so frame 0 is the true, settled start.
+    await page.evaluate(() => {
+      window.__framecast.tick(0);
+      window.__framecast.seekDeclarative(0);
+      if (document.body) void document.body.offsetHeight;
+    });
+    try { await grab(); await grab(); } catch (_) {}
+
     for (let i = 0; i < totalFrames; i++) {
       if (ffmpegErr || !ffmpeg.stdin.writable) throw new Error('ffmpeg stopped early' + (ffmpegErr ? ': ' + ffmpegErr.message : ' (exit ' + ffmpeg.exitCode + ')'));
       const t = i * frameMs;
+      // Keep CSS animations seeked to the exact virtual time (animations:'allow'
+      // semantics) rather than reset — we set currentTime explicitly.
       await page.evaluate((tt) => {
         window.__framecast.tick(tt);
         window.__framecast.seekDeclarative(tt);
       }, t);
-      // JPEG capture is ~2x faster than PNG and visually lossless into x264.
-      // Transparency needs PNG's alpha, so use PNG only for transparent output.
-      // Keep animations:'allow' — 'disabled' would reset/seek CSS animations,
-      // clobbering the exact currentTime we set.
-      const shot = transparent
-        ? { type: 'png', omitBackground: true }
-        : { type: 'jpeg', quality: 90 };
-      const frame = await page.screenshot({ ...shot, animations: 'allow', clip: { x: 0, y: 0, width, height } });
+      const frame = await grab();
       const ok = ffmpeg.stdin.write(frame);
       if (!ok) await new Promise((r) => ffmpeg.stdin.once('drain', r));
       if (i % Math.ceil(fps / 2) === 0 || i === totalFrames - 1) {
@@ -351,39 +380,60 @@ function runFfmpeg(args, bin) {
 // Reframe a MASTER video into a target format. Same aspect = clean scale; a
 // different aspect = the master fitted inside, with a blurred-zoomed fill behind
 // (no ugly black bars). Optional watermark. This is the "smart reframe".
-function reframeArgs({ masterPath, width, height, container, quality, watermark, fps, outPath }) {
+function reframeArgs({ masterPath, masterW, masterH, width, height, container, quality, watermark, fps, outPath }) {
   const q = QUALITY[quality] || QUALITY.high;
   const wm = watermark ? watermarkFilter() : null;
-  const fit = `[0:v]split[bg][fg];[bg]scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height},gblur=sigma=22[bgb];[fg]scale=${width}:${height}:force_original_aspect_ratio=decrease[fgs];[bgb][fgs]overlay=(W-w)/2:(H-h)/2,setsar=1` + (wm ? `,${wm}` : '');
+  const wmS = wm ? `,${wm}` : '';
+  // If the target aspect matches the master, there are no bars to fill — just
+  // scale. This skips the whole blur/overlay (one of the 3 kit formats always
+  // matches the master's native aspect), a big saving.
+  const sameAspect = masterW && masterH && Math.abs((masterW / masterH) - (width / height)) < 0.01;
+  let fit;
+  if (sameAspect) {
+    fit = `[0:v]scale=${width}:${height}:flags=lanczos,setsar=1${wmS}`;
+  } else {
+    // Blurred-zoom fill behind a fitted master. The blur runs on a HALF-RES
+    // plane (sigma halved to match) then scales up — visually identical to a
+    // full-res sigma=22 blur but ~5-6x cheaper. Done for each non-matching format.
+    const bw = Math.max(2, Math.round(width / 4) * 2), bh = Math.max(2, Math.round(height / 4) * 2);
+    fit = `[0:v]split[bg][fg];[bg]scale=${bw}:${bh}:force_original_aspect_ratio=increase,crop=${bw}:${bh},gblur=sigma=11,scale=${width}:${height}[bgb];[fg]scale=${width}:${height}:force_original_aspect_ratio=decrease[fgs];[bgb][fgs]overlay=(W-w)/2:(H-h)/2,setsar=1${wmS}`;
+  }
   if (container === 'gif') {
     return ['-y', '-i', masterPath, '-filter_complex', `${fit},split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=3`, '-r', String(Math.min(fps, 24)), outPath];
   }
   if (container === 'webm') {
     return ['-y', '-i', masterPath, '-filter_complex', fit, '-r', String(fps), '-c:v', 'libvpx-vp9', '-pix_fmt', 'yuv420p', '-b:v', '0', '-crf', String(q.crf + 8), '-row-mt', '1', outPath];
   }
-  return ['-y', '-i', masterPath, '-filter_complex', fit, '-r', String(fps), '-c:v', 'libx264', '-preset', q.preset, '-crf', String(q.crf), '-pix_fmt', 'yuv420p', '-movflags', '+faststart', outPath];
+  return ['-y', '-i', masterPath, '-filter_complex', fit, '-r', String(fps), '-c:v', 'libx264', '-preset', q.preset, '-crf', String(q.crf), '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-x264-params', 'threads=0', outPath];
 }
 
 // One drop -> every platform. Capture the animation ONCE (the expensive part),
 // then reframe that master into each requested format. Returns one file per format.
 async function renderKit(opts) {
   const kitPresets = opts.kitPresets || ['youtube-1080', 'vertical-1080', 'square-1080'];
-  // 1) master: clean, full-res, native aspect, full duration (the one capture)
+  const onProgress = opts.onProgress || (() => {});
+  // 1) master: clean, full-res, native aspect, full duration (the one capture).
+  // Encode it near-lossless but FAST ('intermediate'): it's deleted after the
+  // reframes, so a slow encode here would be pure waste.
   const master = await render({
     ...opts, preset: opts.preset || 'auto', autoFormat: (opts.preset || 'auto') === 'auto',
-    watermark: false, maxHeight: null, quality: opts.quality || 'high',
+    watermark: false, maxHeight: null, quality: 'intermediate',
   });
   const dir = path.dirname(master.outPath);
   const base = path.basename(master.outPath).replace(/\.[^.]+$/, '');
   const formats = [];
-  // 2) reframe master -> each format (cheap, no re-capture)
-  for (const id of kitPresets) {
+  // 2) reframe master -> each format (cheap, no re-capture). Report progress so
+  // the UI keeps moving through this phase instead of looking frozen.
+  const n = kitPresets.length;
+  for (let idx = 0; idx < n; idx++) {
+    const id = kitPresets[idx];
     const p = PRESETS[id];
     if (!p) continue;
+    onProgress({ frame: master.totalFrames, total: master.totalFrames, pct: 100, phase: 'reframe', step: idx + 1, steps: n });
     let w = p.width, h = p.height;
     if (opts.maxHeight && h > opts.maxHeight) { const s = opts.maxHeight / h; h = opts.maxHeight; w = Math.round((w * s) / 2) * 2; }
     const outPath = path.join(dir, `${base}-kit-${id}.${p.container}`);
-    await runFfmpeg(reframeArgs({ masterPath: master.outPath, width: w, height: h, container: p.container, quality: opts.quality || 'high', watermark: !!opts.watermark, fps: master.fps, outPath }));
+    await runFfmpeg(reframeArgs({ masterPath: master.outPath, masterW: master.width, masterH: master.height, width: w, height: h, container: p.container, quality: opts.quality || 'high', watermark: !!opts.watermark, fps: master.fps, outPath }));
     formats.push({ preset: id, label: p.label, outPath, width: w, height: h, container: p.container, bytes: fs.statSync(outPath).size });
   }
   try { fs.unlinkSync(master.outPath); } catch (_) {}
