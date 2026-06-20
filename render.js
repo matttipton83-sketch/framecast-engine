@@ -15,12 +15,7 @@ const fs = require('fs');
 const { PRESETS, QUALITY } = require('./presets');
 const virtualTimeScript = require('./virtual-time');
 
-const HARD_CAP_SEC = 75;          // product ceiling: 1:15
-// When an animation has NO readable timeline and just keeps moving forever
-// (loops / continuous motion), there's no natural end — capturing the full 75s
-// is slow and almost never what the user wanted. Default such clips to a short,
-// shareable length; the user can always drag the Length slider up to 1:15.
-const CONTINUOUS_DEFAULT_SEC = 20;
+const HARD_CAP_SEC = 75; // product ceiling: 1:15
 
 // Recursively find the first .ttf/.otf under a directory (last-resort fallback).
 function scanForFont(dir, depth = 0) {
@@ -274,9 +269,7 @@ async function render(opts) {
     // No readable timeline (e.g. bundled GSAP)? Probe for when motion stops.
     if (opts.autoDetect && !durationSec) {
       const probed = await detectDurationSec(page, { capSec: HARD_CAP_SEC });
-      // If motion runs all the way to the cap, it never settled -> treat as
-      // endless and use the short default instead of a full 75s capture.
-      if (probed > 0) durationSec = probed >= HARD_CAP_SEC - 1.5 ? CONTINUOUS_DEFAULT_SEC : probed;
+      if (probed > 0) durationSec = probed;
       clockDirty = true; // the probe advanced the virtual clock + animation state
     }
   }
@@ -318,25 +311,12 @@ async function render(opts) {
   // overhead (stability checks, marshalling), a meaningful per-frame win over
   // thousands of frames. Falls back to page.screenshot for transparent output
   // (alpha needs PNG + omitBackground, cleanest through Playwright).
-  let cdp = null;
-  if (!transparent) { try { cdp = await page.context().newCDPSession(page); } catch (_) { cdp = null; } }
-  const clip = { x: 0, y: 0, width, height, scale: 1 };
-  function shotPW() {
+  // Capture each frame as JPEG (visually lossless into x264, ~2x faster than
+  // PNG); PNG only for transparent output, which needs alpha. This is the proven
+  // Playwright screenshot path — full device-pixel resolution, no surprises.
+  function grab() {
     const shot = transparent ? { type: 'png', omitBackground: true } : { type: 'jpeg', quality: 90 };
     return page.screenshot({ ...shot, animations: 'allow', clip: { x: 0, y: 0, width, height } });
-  }
-  async function grab() {
-    if (cdp) {
-      try {
-        const { data } = await cdp.send('Page.captureScreenshot', { format: 'jpeg', quality: 90, clip, captureBeyondViewport: false });
-        return Buffer.from(data, 'base64');
-      } catch (e) {
-        // Any CDP incompatibility -> permanently fall back to the proven path.
-        cdp = null;
-        return shotPW();
-      }
-    }
-    return shotPW();
   }
 
   try {

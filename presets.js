@@ -43,9 +43,10 @@ const QUALITY = {
   balanced: { crf: 20, preset: 'fast'     },
   small:    { crf: 23, preset: 'veryfast' },
   preview:  { crf: 28, preset: 'veryfast' }, // free teaser: fastest encode, frees CPU
-  // Throwaway master for the kit: near-lossless so the 3 derived encodes don't
-  // compound artifacts, but encoded as fast as possible since it's deleted after.
-  intermediate: { crf: 14, preset: 'ultrafast' },
+  // Throwaway master for the kit: near-lossless (crf 12) so the 3 derived
+  // encodes don't compound artifacts. 'veryfast' is much faster than 'slow' but
+  // keeps the picture crisp — 'ultrafast' can add subtle blocking, avoid it here.
+  intermediate: { crf: 12, preset: 'veryfast' },
 };
 
 module.exports = { PRESETS, QUALITY };
