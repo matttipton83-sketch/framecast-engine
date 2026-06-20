@@ -17,7 +17,7 @@ const os = require('os');
 const { render, renderKit } = require('./render');
 const { JobQueue } = require('./queue');
 const { tierOpts, PRICING } = require('./tiers');
-const { createCheckout, verifyPaid, LIVE } = require('./payments');
+const { createCheckout, verifyPaid, hasActiveSubscription, LIVE } = require('./payments');
 
 const PORT = process.env.PORT || 8080;
 const PUBLIC = __dirname; // flat layout: index.html sits beside server.js
@@ -190,7 +190,7 @@ const server = http.createServer((req, res) => {
       let o; try { o = JSON.parse(body || '{}'); } catch { return sendJSON(res, 400, { error: 'Bad JSON' }); }
       if (!sources.has(o.jobId)) return sendJSON(res, 404, { error: 'Video expired — please re-render' });
       const returnTo = (o.returnTo && /^https?:\/\//.test(o.returnTo)) ? o.returnTo.replace(/\/$/, '') : baseUrl;
-      try { const c = await createCheckout({ jobId: o.jobId, baseUrl, returnTo }); sendJSON(res, 200, { url: c.url, live: LIVE }); }
+      try { const c = await createCheckout({ jobId: o.jobId, baseUrl, returnTo, plan: o.plan }); sendJSON(res, 200, { url: c.url, live: LIVE }); }
       catch (e) { sendJSON(res, 500, { error: e.message }); }
     });
   }
@@ -211,7 +211,8 @@ const server = http.createServer((req, res) => {
       const src = sources.get(o.jobId);
       if (!src) return sendJSON(res, 404, { error: 'Video expired — please re-render' });
       let ok = paid.get(o.jobId) === true;
-      if (!ok) { try { ok = await verifyPaid({ sessionId: o.session }); } catch (e) { return sendJSON(res, 402, { error: 'Payment not verified' }); } }
+      if (!ok && o.session) { try { ok = await verifyPaid({ sessionId: o.session }); } catch (e) { return sendJSON(res, 402, { error: 'Payment not verified' }); } }
+      if (!ok && o.email) { try { ok = await hasActiveSubscription(o.email); } catch (e) {} }
       if (!ok) return sendJSON(res, 402, { error: 'Payment required' });
       paid.set(o.jobId, true);
       const pd = tierOpts('paid');
