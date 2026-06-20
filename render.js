@@ -511,4 +511,73 @@ async function renderKit(opts) {
   return { durationSec: master.durationSec, fps: master.fps, formats };
 }
 
-module.exports = { render, renderKit, PRESETS, QUALITY, HARD_CAP_SEC, lastChangeIndex, settleDurationSec };
+// Fast, capture-free analysis pass for the detect-and-confirm UI. Launches the
+// page exactly like render() (virtual clock + mount gate) and runs the SAME
+// aspect + duration detection — but never captures a frame or touches ffmpeg, so
+// it's much cheaper than a render. Returns what the studio needs to pre-fill its
+// controls and explain its choices BEFORE the user commits to (pays for) a render.
+async function analyze(opts) {
+  const input = opts.input;
+  const isUrl = /^https?:\/\//i.test(input);
+  const target = isUrl ? input : 'file://' + path.resolve(input);
+  const browser = await chromium.launch({ args: ['--force-color-profile=srgb', '--disable-lcd-text'] });
+  try {
+    const page = await browser.newPage({ viewport: { width: 1920, height: 1080 }, deviceScaleFactor: 1 });
+    await page.addInitScript(virtualTimeScript());
+    try { await page.goto(target, { waitUntil: 'domcontentloaded', timeout: 20000 }); }
+    catch (e) { try { await page.goto(target, { waitUntil: 'commit', timeout: 20000 }); } catch (_) {} }
+    await Promise.race([
+      page.evaluate(() => (document.fonts && document.fonts.ready) || Promise.resolve()).catch(() => {}),
+      page.waitForTimeout(2500),
+    ]);
+    await page.waitForTimeout(150);
+    await waitForReady(page); // mount gate — measure the real animation, not a placeholder
+
+    // --- aspect ratio -> nearest standard preset (same logic as render's auto) ---
+    const aspectRatio = await page.evaluate(() => {
+      let best = { area: 0, w: 16, h: 9 };
+      const els = document.body ? document.body.querySelectorAll('*') : [];
+      for (const el of els) {
+        const r = el.getBoundingClientRect();
+        const area = r.width * r.height;
+        if (r.width > 40 && r.height > 40 && area > best.area) best = { area, w: r.width, h: r.height };
+      }
+      const de = document.documentElement;
+      if (best.area === 0) best = { w: de.scrollWidth || 16, h: de.scrollHeight || 9 };
+      return best.w / best.h;
+    });
+    const cands = [{ id: 'youtube-1080', r: 16 / 9 }, { id: 'square-1080', r: 1 }, { id: 'vertical-1080', r: 9 / 16 }];
+    const preset = cands.sort((a, b) => Math.abs(a.r - aspectRatio) - Math.abs(b.r - aspectRatio))[0].id;
+    const P = PRESETS[preset];
+
+    // --- duration: same precedence as render (declared > css/gsap > loop > settle) ---
+    const info = await page.evaluate(() => {
+      let declaredMs = 0;
+      try {
+        if (typeof window.FRAMECAST_DURATION === 'number' && window.FRAMECAST_DURATION > 0) declaredMs = window.FRAMECAST_DURATION * 1000;
+        else { const m = document.querySelector('meta[name="framecast:duration"]'); const v = m && parseFloat(m.getAttribute('content')); if (v > 0) declaredMs = v * 1000; }
+      } catch (e) {}
+      const css = window.__framecast.longestFiniteMs();
+      let gsapMs = 0;
+      try { const g = window.gsap; if (g && g.globalTimeline) { const td = g.globalTimeline.totalDuration(); if (isFinite(td) && td > 0 && td < 36000) gsapMs = td * 1000; } } catch (e) {}
+      return { declaredMs, cssMs: css.max || 0, gsapMs, max: Math.max(css.max || 0, gsapMs), sawInfinite: css.sawInfinite };
+    });
+    let durationSec = 0, durSource = 'default', loop = { detected: false }, blanks = { blankRanges: [], tornSteps: [] };
+    if (info.declaredMs > 0) { durationSec = Math.min(HARD_CAP_SEC, info.declaredMs / 1000); durSource = 'declared'; }
+    else if (info.max > 0) { durationSec = Math.min(HARD_CAP_SEC, Math.ceil(info.max / 1000 + 0.5)); durSource = (info.gsapMs > 0 && info.gsapMs >= info.cssMs) ? 'gsap' : 'css'; }
+    if (!durationSec) {
+      const probe = await analyzeProbe(page, { capSec: HARD_CAP_SEC });
+      loop = probe.loop; blanks = probe.blanks;
+      if (probe.loop && probe.loop.detected && probe.loop.confidence >= 0.6) { durationSec = Math.min(HARD_CAP_SEC, Math.max(3, probe.loop.periodSec)); durSource = 'loop'; }
+      else if (probe.settleSec > 0) { durationSec = probe.settleSec; durSource = 'settle'; }
+    }
+    if (!durationSec) { durationSec = 15; durSource = 'default'; }
+    durationSec = Math.min(durationSec, HARD_CAP_SEC);
+
+    return { preset, label: P.label, width: P.width, height: P.height, aspectRatio: +aspectRatio.toFixed(4), durationSec, durSource, loop, blanks, info };
+  } finally {
+    try { await browser.close(); } catch (_) {}
+  }
+}
+
+module.exports = { render, renderKit, analyze, PRESETS, QUALITY, HARD_CAP_SEC, lastChangeIndex, settleDurationSec };

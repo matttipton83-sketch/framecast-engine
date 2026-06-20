@@ -14,7 +14,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
-const { render, renderKit } = require('./render');
+const { render, renderKit, analyze } = require('./render');
 const { JobQueue } = require('./queue');
 const { tierOpts, PRICING } = require('./tiers');
 const { createCheckout, verifyPaid, hasActiveSubscription, verifyWebhook, LIVE } = require('./payments');
@@ -105,7 +105,20 @@ function runKit(job, onProgress) {
   });
 }
 
-const queue = new JobQueue({ concurrency: CONCURRENCY, processor: (job, op) => job.payload.kit ? runKit(job, op) : runRender(job, op) });
+// Capture-free analysis for the detect-and-confirm card: detect format + duration
+// (incl. loop) without rendering. Returns the analysis straight as the job result.
+function runAnalyze(job) {
+  const { html } = job.payload;
+  const htmlPath = path.join(WORK, `an-${job.id}.html`);
+  fs.writeFileSync(htmlPath, html);
+  return analyze({ input: htmlPath }).then((a) => {
+    try { fs.unlinkSync(htmlPath); } catch (_) {}
+    return a;
+  });
+}
+
+const queue = new JobQueue({ concurrency: CONCURRENCY, processor: (job, op) =>
+  job.payload.analyze ? runAnalyze(job) : (job.payload.kit ? runKit(job, op) : runRender(job, op)) });
 
 // Allow the UI (hosted anywhere, e.g. Netlify) to call this render API.
 // Lock CORS_ORIGIN to your Netlify URL in production; defaults to "*" for testing.
@@ -189,6 +202,19 @@ const server = http.createServer((req, res) => {
     const s = stash.get(id);
     if (!s) return sendJSON(res, 404, { error: 'Handoff expired — drop the file again' });
     return sendJSON(res, 200, { html: s.html, name: s.name });
+  }
+
+  // 0) Detect-and-confirm: analyze the dropped file (format + duration + loop)
+  //    WITHOUT rendering, so the studio can show "here's what we found" and let
+  //    the user confirm/adjust before paying. Poll /api/jobs/:id for the result.
+  if (req.method === 'POST' && url.pathname === '/api/analyze') {
+    return readBody(req, (body) => {
+      if (body === null) return sendJSON(res, 413, { error: 'File too large' });
+      let o; try { o = JSON.parse(body); } catch { return sendJSON(res, 400, { error: 'Bad JSON' }); }
+      if (!o.html || typeof o.html !== 'string') return sendJSON(res, 400, { error: 'Missing html' });
+      const job = queue.add({ analyze: true, html: o.html, name: (o.name || 'animation') });
+      sendJSON(res, 200, { jobId: job.id });
+    });
   }
 
   // 1) Free preview render
