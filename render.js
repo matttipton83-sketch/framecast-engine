@@ -13,6 +13,7 @@ const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const { PRESETS, QUALITY } = require('./presets');
+const { findLoopPeriod, detectBlankRanges, frameSignature } = require('./analyze');
 const virtualTimeScript = require('./virtual-time');
 
 const HARD_CAP_SEC = 75; // product ceiling: 1:15
@@ -121,26 +122,39 @@ function settleDurationSec(sizes, stepMs, { capSec = 75, minSec = 3 } = {}) {
   return Math.min(capSec, Math.max(minSec, (li * stepMs) / 1000 + 0.5));
 }
 
-// Probe the page to find when the animation stops changing (its true end).
-// Used only when no readable timeline (CSS/WAAPI/GSAP global) was found.
-// Bounded by capSec; falls back gracefully (returns 0 => caller uses default).
-async function detectDurationSec(page, { capSec = 75, stepMs = 500, minSec = 3 } = {}) {
+// Probe the page once and derive everything we can from a single tiny-viewport
+// scan: the settle duration (when motion stops) AND a perceptual fingerprint per
+// frame for loop / blank detection. Used only when no readable timeline
+// (CSS/WAAPI/GSAP global) was found. Falls back gracefully on any failure.
+//
+// Window note: to recognize a LOOP we must observe ~2 full cycles, so the scan
+// runs to `loopWindowSec` (default 150s) — longer than the 75s product cap — even
+// though the rendered clip is still capped at capSec. This only runs on the hard
+// "no timeline" path, so the extra tiny screenshots are a fair price for not
+// rendering a 60s looping ad out to 75s.
+async function analyzeProbe(page, { capSec = 75, loopWindowSec = 150, stepMs = 500, minSec = 3 } = {}) {
+  const empty = { settleSec: 0, loop: { detected: false }, blanks: { blankRanges: [], tornSteps: [] } };
   try {
     const prevW = page.viewportSize();
-    await page.setViewportSize({ width: 480, height: 270 }); // tiny = fast probe
-    const steps = Math.floor((capSec * 1000) / stepMs);
-    const sizes = [];
+    await page.setViewportSize({ width: 320, height: 180 }); // tiny = fast probe
+    const steps = Math.floor((loopWindowSec * 1000) / stepMs);
+    const signatures = [];
     // Scan the FULL window (no early break): a mid-clip pause must never be
-    // mistaken for the end. settleDurationSec takes the last real change.
+    // mistaken for the end, and a long loop period needs the whole window.
     for (let i = 0; i <= steps; i++) {
       await page.evaluate((tt) => { window.__framecast.tick(tt); window.__framecast.seekDeclarative(tt); }, i * stepMs);
       const buf = await page.screenshot({ type: 'jpeg', quality: 50 });
-      sizes.push(buf.length);
+      signatures.push(frameSignature(buf)); // { size, hash }
     }
     if (prevW) await page.setViewportSize(prevW);
-    return settleDurationSec(sizes, stepMs, { capSec, minSec });
+    const sizes = signatures.map((s) => s.size);
+    return {
+      settleSec: settleDurationSec(sizes, stepMs, { capSec, minSec }),
+      loop: findLoopPeriod(signatures, stepMs),
+      blanks: detectBlankRanges(signatures, stepMs),
+    };
   } catch (e) {
-    return 0; // any failure -> caller default
+    return empty; // any failure -> caller default
   }
 }
 
@@ -267,6 +281,7 @@ async function render(opts) {
   // Decide duration.
   let durationSec = opts.durationSec;
   let clockDirty = false;
+  let analysis = null; // { loop, blanks } from the probe — surfaced on the result
   if (!durationSec || opts.autoDetect) {
     const info = await page.evaluate(() => {
       // 1) Explicit author intent wins — the reliable path for held end cards.
@@ -288,7 +303,14 @@ async function render(opts) {
       let gsapMs = 0;
       try {
         const g = window.gsap;
-        if (g && g.globalTimeline) gsapMs = (g.globalTimeline.totalDuration() || 0) * 1000;
+        if (g && g.globalTimeline) {
+          const td = g.globalTimeline.totalDuration();
+          // An infinitely-repeating GSAP timeline (repeat:-1) reports Infinity or a
+          // huge sentinel — that's NOT the animation's real end. Ignore anything
+          // non-finite or implausibly long (>10h) so the loop probe can find the
+          // true cycle length instead of falling back to the 75s cap.
+          if (isFinite(td) && td > 0 && td < 36000) gsapMs = td * 1000;
+        }
       } catch (e) {}
       return { declaredMs, max: Math.max(css.max || 0, gsapMs), sawInfinite: css.sawInfinite };
     });
@@ -298,10 +320,18 @@ async function render(opts) {
     } else if (opts.autoDetect && info.max > 0) {
       durationSec = Math.min(HARD_CAP_SEC, Math.ceil((info.max / 1000) + 0.5));
     }
-    // No readable timeline (e.g. bundled GSAP)? Probe for when motion stops.
+    // No readable timeline (e.g. bundled GSAP)? Probe for motion + loop + blanks.
     if (opts.autoDetect && !durationSec) {
-      const probed = await detectDurationSec(page, { capSec: HARD_CAP_SEC });
-      if (probed > 0) durationSec = probed;
+      const probe = await analyzeProbe(page, { capSec: HARD_CAP_SEC });
+      analysis = { loop: probe.loop, blanks: probe.blanks };
+      // A confident LOOP -> render exactly ONE clean cycle instead of running to
+      // the 75s cap. This is the fix for looping ads over-detecting to 1:15.
+      if (probe.loop && probe.loop.detected && probe.loop.confidence >= 0.6) {
+        durationSec = Math.min(HARD_CAP_SEC, Math.max(3, probe.loop.periodSec));
+        console.log(`[framecast] loop detected: ${probe.loop.periodSec}s ×${probe.loop.cycles} (conf ${probe.loop.confidence}) -> rendering one cycle`);
+      } else if (probe.settleSec > 0) {
+        durationSec = probe.settleSec; // motion-settle fallback (previous behavior)
+      }
       clockDirty = true; // the probe advanced the virtual clock + animation state
     }
   }
@@ -387,7 +417,8 @@ async function render(opts) {
   }
 
   const { size } = fs.statSync(outPath);
-  return { outPath, durationSec, totalFrames, fps, width, height, bytes: size };
+  return { outPath, durationSec, totalFrames, fps, width, height, bytes: size,
+    loop: analysis ? analysis.loop : null, blanks: analysis ? analysis.blanks : null };
 }
 
 // run ffmpeg with args, resolve on success.
