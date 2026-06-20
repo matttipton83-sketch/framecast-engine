@@ -144,6 +144,34 @@ async function detectDurationSec(page, { capSec = 75, stepMs = 500, minSec = 3 }
   }
 }
 
+// Wait for the REAL animation to be mounted and settled before we capture frame 0.
+// Many Claude artifacts are "bundled": they show a placeholder, then async-load
+// React/Babel and mount the actual animation at runtime. Capturing before that
+// finishes means the opening is missed ("starts late / cut off"). Driven entirely
+// from Node, because the page's own setTimeout/Date are virtualized (frozen at 0).
+async function waitForReady(page, maxMs = 12000) {
+  const deadline = Date.now() + maxMs;
+  // a) Known Claude bundler placeholder(s) gone -> the real component has mounted.
+  await page.waitForFunction(() => {
+    const ids = ['__bundler_thumbnail', '__bundler_loading', '__bundler_placeholder'];
+    return ids.every((id) => {
+      const el = document.getElementById(id);
+      if (!el) return true;
+      const cs = getComputedStyle(el);
+      return cs.display === 'none' || cs.visibility === 'hidden' || el.offsetHeight === 0;
+    });
+  }, { timeout: Math.max(500, deadline - Date.now()), polling: 200 }).catch(() => {});
+  // b) DOM stops changing -> first real paint is in. Polled from Node (NOT page
+  //    timers). Once mounted, the virtual clock is paused at 0 so the DOM is stable.
+  let lastSig = null, stableSince = Date.now();
+  while (Date.now() < deadline) {
+    const sig = await page.evaluate(() => (document.body ? document.body.innerHTML.length : 0)).catch(() => -1);
+    if (sig === lastSig) { if (Date.now() - stableSince > 500) break; }
+    else { lastSig = sig; stableSince = Date.now(); }
+    await page.waitForTimeout(150);
+  }
+}
+
 async function render(opts) {
   const {
     input,                         // path to .html (or http URL)
@@ -188,6 +216,10 @@ async function render(opts) {
     page.waitForTimeout(2500),
   ]);
   await page.waitForTimeout(150);
+  // Gate on the real animation being mounted (bundled artifacts load async). This
+  // is what makes the capture actually start at the animation's beginning, and it
+  // also means aspect-detection measures the real content, not a placeholder.
+  await waitForReady(page);
 
   // --- format auto-detection: read the animation's natural aspect ratio ---
   if (auto) {
@@ -288,6 +320,7 @@ async function render(opts) {
       page.evaluate(() => (document.fonts && document.fonts.ready) || Promise.resolve()).catch(() => {}),
       page.waitForTimeout(2500),
     ]);
+    await waitForReady(page); // re-mount after the reload before the real capture
     await page.setViewportSize({ width, height });
     await page.waitForTimeout(120);
   }
