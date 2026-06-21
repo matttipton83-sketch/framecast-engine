@@ -71,6 +71,7 @@ function runRender(job, onProgress) {
     watermark,
     maxHeight,
     removeOverlay: job.payload.removeOverlay,
+    cropBottom: job.payload.cropBottom,
     outDir: WORK,
     onProgress,
   }).then((r) => {
@@ -91,7 +92,7 @@ function runKit(job, onProgress) {
   return renderKit({
     input: htmlPath, preset: preset || 'auto', autoFormat: (preset || 'auto') === 'auto',
     quality: quality || 'high', durationSec: durationSec || undefined, autoDetect: !durationSec,
-    watermark: false, maxHeight: null, removeOverlay: job.payload.removeOverlay, outDir: WORK, onProgress,
+    watermark: false, maxHeight: null, removeOverlay: job.payload.removeOverlay, cropBottom: job.payload.cropBottom, outDir: WORK, onProgress,
   }).then((r) => {
     try { fs.unlinkSync(htmlPath); } catch (_) {}
     const cleanups = [];
@@ -179,6 +180,7 @@ const cleanParams = (o) => ({
   preset: o.preset || 'auto',
   durationSec: o.durationSec ? Math.min(75, Math.max(1, Number(o.durationSec))) : undefined,
   removeOverlay: !!o.removeOverlay,
+  cropBottom: o.cropBottom ? Math.min(0.5, Math.max(0, Number(o.cropBottom))) : undefined,
 });
 
 const server = http.createServer((req, res) => {

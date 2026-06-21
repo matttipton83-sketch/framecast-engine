@@ -389,10 +389,20 @@ async function render(opts) {
   ffmpegDone.catch(() => {}); // never an "unhandled" rejection (would crash the process)
 
   // Optional: remove a baked-in play-bar / fake video-player UI before capture.
-  // Tags the chrome elements (display:none) and keeps them hidden across the
-  // animation's re-renders via an injected style rule + MutationObserver. Only
-  // DOM-built bars are targeted; the animation itself is untouched.
-  if (opts.removeOverlay) { try { await page.evaluate(overlayPageFn, { mode: 'hide' }); } catch (_) {} }
+  //  • DOM bars  -> hide the chrome elements (display:none + MutationObserver so
+  //    they stay hidden across re-renders); the animation itself is untouched.
+  //  • SVG/canvas/dynamic bars (vision tie-break) -> can't be hidden, so crop the
+  //    bottom strip via the capture clip; the existing scale upsizes it back to
+  //    full size (uniform zoom, no distortion).
+  const cropBottom = (opts.cropBottom && opts.cropBottom > 0.02 && opts.cropBottom < 0.5) ? opts.cropBottom : 0;
+  let grabClip = { x: 0, y: 0, width, height };
+  if (cropBottom) {
+    const cw = Math.max(2, Math.round(width * (1 - cropBottom) / 2) * 2);
+    const ch = Math.max(2, Math.round(height * (1 - cropBottom) / 2) * 2);
+    grabClip = { x: Math.round((width - cw) / 2), y: 0, width: cw, height: ch };
+  } else if (opts.removeOverlay) {
+    try { await page.evaluate(overlayPageFn, { mode: 'hide' }); } catch (_) {}
+  }
 
   // Capture via the raw DevTools protocol — skips Playwright's per-screenshot
   // overhead (stability checks, marshalling), a meaningful per-frame win over
@@ -403,7 +413,7 @@ async function render(opts) {
   // Playwright screenshot path — full device-pixel resolution, no surprises.
   function grab() {
     const shot = transparent ? { type: 'png', omitBackground: true } : { type: 'jpeg', quality: 90 };
-    return page.screenshot({ ...shot, animations: 'allow', clip: { x: 0, y: 0, width, height } });
+    return page.screenshot({ ...shot, animations: 'allow', clip: grabClip });
   }
 
   try {
@@ -591,10 +601,67 @@ async function analyze(opts) {
       overlay = await page.evaluate(overlayPageFn, { mode: 'detect' });
     } catch (e) {}
 
+    // Vision tie-break (hybrid): only when the DOM heuristic found nothing AND a
+    // key is configured. The page is already seeked to mid-playback above, so we
+    // grab that frame and ask Claude. A vision hit can't be DOM-hidden (it's
+    // SVG/canvas/dynamic) -> mark it for crop removal.
+    if (!overlay.detected && process.env.ANTHROPIC_API_KEY) {
+      try {
+        const frame = await page.screenshot({ type: 'jpeg', quality: 70 });
+        const v = await visionDetectOverlay(frame);
+        if (v && v.present && v.confidence >= 0.5) {
+          overlay = { detected: true, confidence: v.confidence, kind: 'vision', removable: false, y: +v.yFraction.toFixed(3), evidence: ['vision'], box: { x: 0, y: +v.yFraction.toFixed(3), w: 1, h: +(1 - v.yFraction).toFixed(3) } };
+        }
+      } catch (e) {}
+    }
+
     return { preset, label: P.label, width: P.width, height: P.height, aspectRatio: +aspectRatio.toFixed(4), durationSec, durSource, loop, blanks, overlay, info };
   } finally {
     try { await browser.close(); } catch (_) {}
   }
 }
 
-module.exports = { render, renderKit, analyze, PRESETS, QUALITY, HARD_CAP_SEC, lastChangeIndex, settleDurationSec };
+// Vision tie-break: when the DOM heuristic finds no play-bar, ask Claude (Haiku)
+// to look at one mid-playback frame. Catches bars drawn in SVG/canvas or built
+// dynamically (no clean DOM text to key on) — e.g. the LazzoLead ad. Gated by
+// ANTHROPIC_API_KEY: no key => skipped (returns null), so it costs nothing until
+// enabled, and Matt controls cost by adding/removing the key on Render.
+const VISION_PROMPT =
+  'This is ONE frame of an animation that will be exported as a video. Some ads bake a FAKE ' +
+  'video-player UI into the design — a play/pause button, a horizontal scrubber/progress bar, and a ' +
+  'timecode like "0:19 / 1:00" — usually as a strip near the BOTTOM. It is NOT a real video player, ' +
+  'just part of the artwork the user may want removed. Look ONLY for that kind of fake player strip ' +
+  '(ignore normal ad text, logos, captions, buttons). Reply with COMPACT JSON only: ' +
+  '{"present":true|false,"yFraction":<top edge of the bar as a 0-1 fraction of height>,"confidence":<0-1>}. ' +
+  'If there is no such player strip, {"present":false,"yFraction":0,"confidence":0}.';
+
+async function visionDetectOverlay(jpegBuffer) {
+  const key = process.env.ANTHROPIC_API_KEY;
+  if (!key || !jpegBuffer || !jpegBuffer.length) return null;
+  try {
+    const body = {
+      model: process.env.FRAMECAST_VISION_MODEL || 'claude-haiku-4-5-20251001',
+      max_tokens: 120,
+      messages: [{ role: 'user', content: [
+        { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: jpegBuffer.toString('base64') } },
+        { type: 'text', text: VISION_PROMPT },
+      ] }],
+    };
+    const ctrl = new AbortController();
+    const to = setTimeout(() => ctrl.abort(), 15000);
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST', signal: ctrl.signal,
+      headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    }).finally(() => clearTimeout(to));
+    if (!r.ok) return null;
+    const j = await r.json();
+    const txt = (j.content && j.content[0] && j.content[0].text) || '';
+    const m = txt.match(/\{[\s\S]*\}/);
+    if (!m) return null;
+    const o = JSON.parse(m[0]);
+    return { present: !!o.present, yFraction: Math.max(0, Math.min(1, +o.yFraction || 0.9)), confidence: Math.max(0, Math.min(1, +o.confidence || 0)) };
+  } catch (e) { return null; }
+}
+
+module.exports = { render, renderKit, analyze, visionDetectOverlay, PRESETS, QUALITY, HARD_CAP_SEC, lastChangeIndex, settleDurationSec };
