@@ -261,25 +261,36 @@ function scoreOverlay({ timecode, bar, play } = {}) {
 //                  the ones we can cleanly remove.
 function overlayPageFn(arg) {
   var mode = (arg && arg.mode) || 'detect';
-  var W = window.innerWidth, H = window.innerHeight, bandTop = H * 0.78;
+  var W = window.innerWidth, H = window.innerHeight;
   var reTC = /\b\d{1,2}:\d{2}\s*\/\s*\d{1,2}:\d{2}\b/;
+  // The player bar sits at the bottom of the CONTENT STAGE, not the viewport —
+  // measure the band relative to the stage (body rect clamped to the viewport).
+  function stageRect() {
+    var r = document.body ? document.body.getBoundingClientRect() : null;
+    if (!r || r.width < 10 || r.height < 10) return { left: 0, top: 0, width: W, height: H };
+    return { left: Math.max(0, r.left), top: Math.max(0, r.top), width: Math.min(W, r.width), height: Math.min(H, r.height) };
+  }
+  var S = stageRect();
+  var sW = S.width, sH = S.height, sB = S.top + sH, sL = S.left, sR = S.left + sW;
+  var bandTop = S.top + sH * 0.72;
+  function inX(r) { return r.left >= sL - 4 && r.right <= sR + 4; }
   function scan() {
     var all = document.body ? document.body.querySelectorAll('*') : [];
     var tc = null, bar = null, play = null;
     for (var i = 0; i < all.length; i++) {
       var el = all[i]; var r = el.getBoundingClientRect();
       if (r.width < 2 || r.height < 2) continue;
-      if (r.bottom < bandTop) continue;
+      if (r.bottom < bandTop || r.top > sB + 4 || !inX(r)) continue;
       var t = (el.textContent || '').trim();
-      if (!tc && t && t.length <= 24 && reTC.test(t)) tc = el;
-      if (!bar && r.width > W * 0.5 && r.height > 1 && r.height < H * 0.05 && r.top > bandTop) bar = el;
-      if (!play && r.width > 6 && r.height > 6 && r.width < H * 0.09 && r.height < H * 0.09 && r.left < W * 0.30 && r.top > bandTop) play = el;
+      if (!tc && t && t.length <= 30 && reTC.test(t)) tc = el;
+      if (!bar && r.width > sW * 0.45 && r.height > 1 && r.height < sH * 0.06) bar = el;
+      if (!play && r.width > 6 && r.height > 6 && r.width < sH * 0.12 && r.height < sH * 0.12 && r.left < sL + sW * 0.33) play = el;
     }
     return { tc: tc, bar: bar, play: play };
   }
   function chromeOf(s) {
-    if (s.tc) { var n = s.tc; for (var i = 0; i < 6 && n && n !== document.body; i++) { var r = n.getBoundingClientRect(); if (r.width > W * 0.4 && r.top > bandTop) return n; n = n.parentElement; } return s.tc; }
-    if (s.bar) { var p = s.bar.parentElement; if (p && p.getBoundingClientRect().top > bandTop) return p; return s.bar; }
+    if (s.tc) { var n = s.tc; for (var i = 0; i < 6 && n && n !== document.body; i++) { var r = n.getBoundingClientRect(); if (r.width > sW * 0.4 && r.top > bandTop) return n; n = n.parentElement; } return s.tc; }
+    if (s.bar) { var p = s.bar.parentElement; if (p) { var pr = p.getBoundingClientRect(); if (pr.top > bandTop && pr.width > sW * 0.4) return p; } return s.bar; }
     return null;
   }
   var s = scan();
@@ -296,11 +307,18 @@ function overlayPageFn(arg) {
   }
   var ev = []; if (s.tc) ev.push('timecode'); if (s.bar) ev.push('progress-bar'); if (s.play) ev.push('play-glyph');
   var ch = chromeOf(s); var y = 0.9;
-  if (ch) { y = Math.max(0, Math.min(1, ch.getBoundingClientRect().top / H)); }
-  else if (s.bar) { y = s.bar.getBoundingClientRect().top / H; }
+  var rr = ch ? ch.getBoundingClientRect() : (s.bar ? s.bar.getBoundingClientRect() : null);
+  if (rr && sH > 0) y = Math.max(0, Math.min(1, (rr.top - S.top) / sH));
   var detected = false, conf = 0;
   if (s.tc) { detected = true; conf = 0.9; } else if (s.bar && s.play) { detected = true; conf = 0.7; } else if (s.bar) { detected = false; conf = 0.4; }
-  return { detected: detected, confidence: conf, removable: !!ch, kind: 'dom', y: Math.round(y * 1000) / 1000, evidence: ev, box: { x: 0, y: Math.round(y * 1000) / 1000, w: 1, h: Math.round((1 - y) * 1000) / 1000 } };
+  // debug: what the stage's bottom band actually contains (for tuning)
+  var dbg = { stage: { x: Math.round(S.left), y: Math.round(S.top), w: Math.round(sW), h: Math.round(sH), vw: W, vh: H }, band: [] };
+  try {
+    var a2 = document.body ? document.body.querySelectorAll('*') : [];
+    for (var j = 0; j < a2.length; j++) { var e2 = a2[j]; var r2 = e2.getBoundingClientRect(); if (r2.bottom > bandTop && r2.top < sB + 4 && r2.width > 8 && r2.height > 2) dbg.band.push({ tag: e2.tagName, t: (e2.textContent || '').trim().slice(0, 18), w: Math.round(r2.width), h: Math.round(r2.height), y: Math.round(((r2.top - S.top) / sH) * 100) / 100 }); }
+    dbg.band = dbg.band.slice(0, 14);
+  } catch (e) {}
+  return { detected: detected, confidence: conf, removable: !!ch, kind: 'dom', y: Math.round(y * 1000) / 1000, evidence: ev, box: { x: 0, y: Math.round(y * 1000) / 1000, w: 1, h: Math.round((1 - y) * 1000) / 1000 }, debug: dbg };
 }
 
 module.exports = {
