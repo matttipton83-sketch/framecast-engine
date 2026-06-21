@@ -594,19 +594,24 @@ async function analyze(opts) {
     // Detect at MID-playback: the duration probe leaves the clock at the end,
     // where a fake player UI has usually finished/disappeared. Seek to ~40% so the
     // scrubber + timecode ("0:24 / 1:00") are on screen.
+    // The duration probe leaves the clock at the END (player UI usually gone) and
+    // backward-seeking doesn't restore it. So reload, re-mount, tick FORWARD to
+    // mid-playback so the scrubber + timecode are actually on screen — for both the
+    // DOM check and the Claude-vision frame.
     let overlay = { detected: false };
     try {
-      const midMs = Math.max(500, Math.min((durationSec || 10) * 1000 * 0.4, (durationSec || 10) * 1000 - 200));
+      try { await page.goto(target, { waitUntil: 'domcontentloaded', timeout: 20000 }); }
+      catch (e) { try { await page.goto(target, { waitUntil: 'commit', timeout: 20000 }); } catch (_) {} }
+      await Promise.race([
+        page.evaluate(() => (document.fonts && document.fonts.ready) || Promise.resolve()).catch(() => {}),
+        page.waitForTimeout(2000),
+      ]);
+      await waitForReady(page);
+      const midMs = Math.max(1500, Math.min(durationSec * 1000 * 0.4, durationSec * 1000 - 300));
       await page.evaluate((tt) => { try { window.__framecast.tick(tt); window.__framecast.seekDeclarative(tt); } catch (e) {} }, midMs);
+      await page.waitForTimeout(60);
       overlay = await page.evaluate(overlayPageFn, { mode: 'detect' });
-    } catch (e) {}
-
-    // Vision tie-break (hybrid): only when the DOM heuristic found nothing AND a
-    // key is configured. The page is already seeked to mid-playback above, so we
-    // grab that frame and ask Claude. A vision hit can't be DOM-hidden (it's
-    // SVG/canvas/dynamic) -> mark it for crop removal.
-    if (!overlay.detected) {
-      try {
+      if (!overlay.detected) {
         const frame = await page.screenshot({ type: 'jpeg', quality: 70 });
         const v = (await visionDetectOverlay(frame)) || {};
         overlay.vision = { status: v.status, present: v.present, conf: v.confidence, note: v.note };
@@ -614,8 +619,8 @@ async function analyze(opts) {
           const yy = +(+v.yFraction).toFixed(3);
           overlay = { detected: true, confidence: v.confidence, kind: 'vision', removable: false, y: yy, evidence: ['vision'], box: { x: 0, y: yy, w: 1, h: +(1 - yy).toFixed(3) }, vision: { status: v.status, conf: v.confidence } };
         }
-      } catch (e) { overlay.vision = { status: 'exception', note: String((e && e.message) || e).slice(0, 120) }; }
-    }
+      }
+    } catch (e) { overlay.vision = { status: 'exception', note: String((e && e.message) || e).slice(0, 120) }; }
 
     return { preset, label: P.label, width: P.width, height: P.height, aspectRatio: +aspectRatio.toFixed(4), durationSec, durSource, loop, blanks, overlay, info };
   } finally {
