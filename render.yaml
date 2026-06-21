@@ -6,10 +6,19 @@ services:
     dockerfilePath: Dockerfile
     plan: standard          # rendering needs real CPU
     healthCheckPath: /healthz
+    # Durable state so a paid order survives a restart/redeploy (see server.js).
+    # NOTE: on an existing service this disk must be added in the Render dashboard
+    # (Settings -> Disks); a blueprint disk only applies on a fresh Blueprint sync.
+    disk:
+      name: framecast-data
+      mountPath: /data
+      sizeGB: 1
     envVars:
       - key: FRAMECAST_CONCURRENCY
         value: "1"
+      - key: FRAMECAST_DATA
+        value: /data
       - key: FRAMECAST_CORS_ORIGIN
-        value: "https://framecast-studio.netlify.app"
+        value: "https://framecastvideo.com"
       - key: PORT
         value: "8080"

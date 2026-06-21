@@ -17,46 +17,24 @@ if (KEY) {
 const LIVE = !!stripe;
 const WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
 
-async function createCheckout({ jobId, baseUrl, returnTo, plan }) {
+async function createCheckout({ jobId, baseUrl, returnTo }) {
   const rt = returnTo || baseUrl;   // where to send the user back (the UI origin)
   if (LIVE) {
-    const common = {
+    // One-time payment for THIS video. No subscriptions — pay once, no account.
+    const session = await stripe.checkout.sessions.create({
       success_url: `${rt}/?paid=${jobId}&session={CHECKOUT_SESSION_ID}`,
       cancel_url: `${rt}/?canceled=${jobId}`,
-      metadata: { jobId, plan: plan === 'pro' ? 'pro' : 'single' },
-    };
-    let session;
-    if (plan === 'pro') {
-      // Pro: a real recurring $9/mo subscription. Stripe Checkout collects the
-      // customer's email and creates a Customer — which is how we recognize the
-      // subscriber later (see hasActiveSubscription).
-      session = await stripe.checkout.sessions.create({
-        ...common,
-        mode: 'subscription',
-        line_items: [{
-          price_data: {
-            currency: PRICING.currency,
-            product_data: { name: 'Framecast Pro — unlimited clean exports' },
-            unit_amount: PRICING.proMonthlyCents,
-            recurring: { interval: 'month' },
-          },
-          quantity: 1,
-        }],
-      });
-    } else {
-      session = await stripe.checkout.sessions.create({
-        ...common,
-        mode: 'payment',
-        line_items: [{
-          price_data: {
-            currency: PRICING.currency,
-            product_data: { name: 'Framecast — clean video export' },
-            unit_amount: PRICING.perVideoCents,
-          },
-          quantity: 1,
-        }],
-      });
-    }
+      metadata: { jobId, plan: 'single' },
+      mode: 'payment',
+      line_items: [{
+        price_data: {
+          currency: PRICING.currency,
+          product_data: { name: 'Framecast — clean video export' },
+          unit_amount: PRICING.perVideoCents,
+        },
+        quantity: 1,
+      }],
+    });
     return { url: session.url, sessionId: session.id };
   }
   // dev fallback: our own fake checkout screen (returns the user to the UI origin)
@@ -71,21 +49,6 @@ async function verifyPaid({ sessionId }) {
   return s && s.payment_status === 'paid';
 }
 
-// True if this email has an active Pro subscription in Stripe (the source of truth,
-// so we don't need our own accounts DB). NOTE: email-only is a lightweight check —
-// good enough at low scale; harden later with a magic-link email verification.
-async function hasActiveSubscription(email) {
-  if (!LIVE || !email) return false;
-  const e = String(email).trim().toLowerCase();
-  if (!e || e.indexOf('@') < 1) return false;
-  const custs = await stripe.customers.list({ email: e, limit: 20 });
-  for (const c of custs.data) {
-    const subs = await stripe.subscriptions.list({ customer: c.id, status: 'active', limit: 1 });
-    if (subs.data.length) return true;
-  }
-  return false;
-}
-
 // Verify a Stripe webhook signature and return the event (or null if not configured).
 // Lets us record a payment server-side even if the buyer's browser misses the redirect.
 function verifyWebhook(rawBody, signature) {
@@ -93,4 +56,4 @@ function verifyWebhook(rawBody, signature) {
   return stripe.webhooks.constructEvent(rawBody, signature, WEBHOOK_SECRET);
 }
 
-module.exports = { createCheckout, verifyPaid, hasActiveSubscription, verifyWebhook, LIVE, PRICING };
+module.exports = { createCheckout, verifyPaid, verifyWebhook, LIVE, PRICING };

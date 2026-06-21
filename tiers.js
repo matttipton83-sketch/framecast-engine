@@ -1,7 +1,6 @@
 // tiers.js — what each tier gets, and what it costs.
 // Pricing is the lever Matt cares about: a one-time user should never hit a
-// subscription wall. So the default paid path is PER-VIDEO, with an optional
-// subscription for power users.
+// subscription wall. The paid path is PER-VIDEO only — pay once, no account.
 
 const TIERS = {
   // Free: a fast 10-second watermarked TEASER at 540p with the fastest encode.
@@ -15,7 +14,7 @@ const TIERS = {
     allow4k: false,
     maxDurationSec: 10,
   },
-  // Paid (per-video OR subscription unlock): clean, full resolution, all formats.
+  // Paid (per-video unlock): clean, full resolution, all formats.
   paid: {
     label: 'Clean export',
     watermark: false,
@@ -28,9 +27,7 @@ const TIERS = {
 const PRICING = {
   currency: 'usd',
   perVideoCents: 299,        // $2.99 to unlock one clean video — tweak freely
-  proMonthlyCents: 900,      // $9/mo optional subscription (unlimited clean)
   perVideoLabel: '$2.99',
-  proMonthlyLabel: '$9/mo',
 };
 
 function tierOpts(tier) {

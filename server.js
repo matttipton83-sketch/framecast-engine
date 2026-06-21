@@ -17,7 +17,7 @@ const os = require('os');
 const { render, renderKit, analyze } = require('./render');
 const { JobQueue } = require('./queue');
 const { tierOpts, PRICING } = require('./tiers');
-const { createCheckout, verifyPaid, hasActiveSubscription, verifyWebhook, LIVE } = require('./payments');
+const { createCheckout, verifyPaid, verifyWebhook, LIVE } = require('./payments');
 
 const PORT = process.env.PORT || 8080;
 const PUBLIC = __dirname; // flat layout: index.html sits beside server.js
@@ -26,6 +26,46 @@ const CONCURRENCY = Number(process.env.FRAMECAST_CONCURRENCY || 1);
 const MAX_HTML_BYTES = Number(process.env.FRAMECAST_MAX_HTML || 8 * 1024 * 1024);
 const SOURCE_TTL = 1000 * 60 * 60 * 6; // keep source 6h so a buyer can unlock later
 fs.mkdirSync(WORK, { recursive: true });
+
+// Durable state dir — a Render persistent disk in prod (FRAMECAST_DATA=/data),
+// the temp dir locally. The in-memory Maps below are just a fast cache; THIS is
+// the source of truth that survives a restart/redeploy, so a paid order can
+// never be stranded by the box recycling between paying and unlocking.
+const DATA = process.env.FRAMECAST_DATA || path.join(os.tmpdir(), 'framecast-data');
+const SRC_DIR = path.join(DATA, 'sources');
+const PAID_DIR = path.join(DATA, 'paid');
+try { fs.mkdirSync(SRC_DIR, { recursive: true }); fs.mkdirSync(PAID_DIR, { recursive: true }); } catch (_) {}
+// Confirm the durable dir is actually writable (a Render disk can mount root-owned
+// and silently block a non-root user). Surfaced in the boot log + /healthz so it's
+// obvious whether we're persisting to disk or only to memory.
+let DATA_OK = false;
+try { const t = path.join(DATA, '.wtest'); fs.writeFileSync(t, '1'); fs.unlinkSync(t); DATA_OK = true; } catch (_) {}
+
+// --- funnel analytics (self-contained, persisted to the durable disk) --------
+// Counts the only numbers that matter for a one-off product: how many people
+// analyzed, previewed, started checkout, and paid — overall and per day. No
+// third-party tracker, no cookies, no PII. Read it at GET /api/stats?key=...
+// (set FRAMECAST_STATS_KEY to enable; without a key the endpoint stays hidden).
+const STATS_FILE = path.join(DATA, 'stats.json');
+const STATS_KEY = process.env.FRAMECAST_STATS_KEY || '';
+let stats; try { stats = JSON.parse(fs.readFileSync(STATS_FILE, 'utf8')); } catch (_) { stats = { since: new Date().toISOString(), totals: {}, daily: {} }; }
+stats.totals = stats.totals || {}; stats.daily = stats.daily || {};
+let statsDirty = false;
+function bump(event, n = 1) {
+  stats.totals[event] = (stats.totals[event] || 0) + n;
+  const day = new Date().toISOString().slice(0, 10);
+  (stats.daily[day] || (stats.daily[day] = {}));
+  stats.daily[day][event] = (stats.daily[day][event] || 0) + n;
+  statsDirty = true;
+}
+// Debounced flush + prune buckets older than 90 days. Skips disk churn when idle.
+setInterval(() => {
+  if (!statsDirty) return;
+  statsDirty = false;
+  const cutoff = Date.now() - 90 * 864e5;
+  for (const d of Object.keys(stats.daily)) { if (new Date(d).getTime() < cutoff) delete stats.daily[d]; }
+  try { fs.writeFileSync(STATS_FILE, JSON.stringify(stats)); } catch (_) {}
+}, 5000).unref?.();
 
 // Lightweight in-memory per-IP rate limiting to deter abuse/DoS of the free,
 // unauthenticated endpoints (each render launches a browser; each hard file may
@@ -66,14 +106,42 @@ process.on('unhandledRejection', (e) => console.error('[unhandledRejection]', e 
 process.on('uncaughtException', (e) => console.error('[uncaughtException]', e && e.message ? e.message : e));
 
 // Source params kept so a paid unlock can re-render the SAME clip cleanly.
-const sources = new Map();   // jobId -> { params, ts }
-const paid = new Map();      // jobId -> true (payment confirmed)
+const sources = new Map();   // jobId -> { params, ts }   (mirrored to SRC_DIR)
+const paid = new Map();      // jobId -> true             (mirrored to PAID_DIR)
+
+// Durable source/paid helpers. The Maps are a fast cache; the disk is the truth
+// that outlives a restart. A buyer is always served if EITHER survives, and the
+// browser can re-supply the HTML on /api/unlock if both were lost (see below).
+function saveSource(jobId, rec) {
+  sources.set(jobId, rec);
+  try { fs.writeFileSync(path.join(SRC_DIR, jobId + '.json'), JSON.stringify(rec)); } catch (_) {}
+}
+function loadSource(jobId) {
+  if (sources.has(jobId)) return sources.get(jobId);
+  try { const rec = JSON.parse(fs.readFileSync(path.join(SRC_DIR, jobId + '.json'), 'utf8')); sources.set(jobId, rec); return rec; } catch (_) { return null; }
+}
+function markPaid(jobId) {
+  paid.set(jobId, true);
+  try { fs.writeFileSync(path.join(PAID_DIR, jobId), '1'); } catch (_) {}
+}
+function isPaid(jobId) {
+  if (paid.get(jobId) === true) return true;
+  try { fs.accessSync(path.join(PAID_DIR, jobId)); paid.set(jobId, true); return true; } catch (_) { return false; }
+}
 // Cross-subdomain handoff: the landing (framecastvideo.com) can't pass a file to
 // the studio (app.framecastvideo.com) via sessionStorage — different origins. So
 // the landing stashes the HTML here and the studio fetches it back by id.
 const stash = new Map();     // id -> { html, name, ts }
 const STASH_TTL = 1000 * 60 * 30; // 30 min is plenty to land + render
-setInterval(() => { const now = Date.now(); for (const [k, v] of sources) if (now - v.ts > SOURCE_TTL) sources.delete(k); }, 60000).unref?.();
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of sources) if (now - v.ts > SOURCE_TTL) sources.delete(k);
+  // Prune durable files past their TTL (source files hold the HTML, so they must
+  // not accumulate; the paid flag expires alongside its source).
+  for (const dir of [SRC_DIR, PAID_DIR]) {
+    try { for (const f of fs.readdirSync(dir)) { const p = path.join(dir, f); try { if (now - fs.statSync(p).mtimeMs > SOURCE_TTL) fs.unlinkSync(p); } catch (_) {} } } catch (_) {}
+  }
+}, 60000).unref?.();
 setInterval(() => { const now = Date.now(); for (const [k, v] of stash) if (now - v.ts > STASH_TTL) stash.delete(k); }, 60000).unref?.();
 
 function runRender(job, onProgress) {
@@ -238,6 +306,7 @@ const server = http.createServer((req, res) => {
       let o; try { o = JSON.parse(body); } catch { return sendJSON(res, 400, { error: 'Bad JSON' }); }
       if (!o.html || typeof o.html !== 'string') return sendJSON(res, 400, { error: 'Missing html' });
       const job = queue.add({ analyze: true, html: o.html, name: (o.name || 'animation') });
+      bump('analyze');
       sendJSON(res, 200, { jobId: job.id });
     });
   }
@@ -255,7 +324,8 @@ const server = http.createServer((req, res) => {
       const teaserSec = Math.min(params.durationSec || free.maxDurationSec, free.maxDurationSec);
       const job = queue.add({ ...params, durationSec: teaserSec, autoDetect: false,
         quality: free.quality, watermark: free.watermark, maxHeight: free.maxHeight });
-      sources.set(job.id, { params, ts: Date.now() });
+      saveSource(job.id, { params, ts: Date.now() });
+      bump('preview');
       sendJSON(res, 200, { jobId: job.id, tier: 'free', price: PRICING.perVideoLabel, teaserSec });
     });
   }
@@ -264,9 +334,9 @@ const server = http.createServer((req, res) => {
   if (req.method === 'POST' && url.pathname === '/api/checkout') {
     return readBody(req, async (body) => {
       let o; try { o = JSON.parse(body || '{}'); } catch { return sendJSON(res, 400, { error: 'Bad JSON' }); }
-      if (!sources.has(o.jobId)) return sendJSON(res, 404, { error: 'Video expired — please re-render' });
+      if (!loadSource(o.jobId)) return sendJSON(res, 404, { error: 'Video expired — please re-render' });
       const returnTo = (o.returnTo && /^https?:\/\//.test(o.returnTo)) ? o.returnTo.replace(/\/$/, '') : baseUrl;
-      try { const c = await createCheckout({ jobId: o.jobId, baseUrl, returnTo, plan: o.plan }); sendJSON(res, 200, { url: c.url, live: LIVE }); }
+      try { const c = await createCheckout({ jobId: o.jobId, baseUrl, returnTo }); bump('checkout'); sendJSON(res, 200, { url: c.url, live: LIVE }); }
       catch (e) { sendJSON(res, 500, { error: e.message }); }
     });
   }
@@ -283,7 +353,7 @@ const server = http.createServer((req, res) => {
       if (event && event.type === 'checkout.session.completed') {
         const s = event.data.object;
         const jobId = s && s.metadata && s.metadata.jobId;
-        if (jobId) paid.set(jobId, true);
+        if (jobId) { markPaid(jobId); bump('paid'); }
       }
       sendJSON(res, 200, { received: true });
     });
@@ -303,13 +373,20 @@ const server = http.createServer((req, res) => {
   if (req.method === 'POST' && url.pathname === '/api/unlock') {
     return readBody(req, async (body) => {
       let o; try { o = JSON.parse(body || '{}'); } catch { return sendJSON(res, 400, { error: 'Bad JSON' }); }
-      const src = sources.get(o.jobId);
-      if (!src) return sendJSON(res, 404, { error: 'Video expired — please re-render' });
-      let ok = paid.get(o.jobId) === true;
+      let src = loadSource(o.jobId);
+      // Browser recovery: if both memory and disk lost the source (a restart with
+      // no persistent disk), but the buyer's browser re-supplied the HTML, rebuild
+      // the order from the request and re-persist it. Payment is still verified
+      // against Stripe below, so this can't be used to skip paying.
+      if (!src && o.html && typeof o.html === 'string') {
+        src = { params: cleanParams(o), ts: Date.now() };
+        saveSource(o.jobId, src);
+      }
+      if (!src) return sendJSON(res, 404, { error: 'Video expired — please drop the file again' });
+      let ok = isPaid(o.jobId);
       if (!ok && o.session) { try { ok = await verifyPaid({ sessionId: o.session }); } catch (e) { return sendJSON(res, 402, { error: 'Payment not verified' }); } }
-      if (!ok && o.email) { try { ok = await hasActiveSubscription(o.email); } catch (e) {} }
       if (!ok) return sendJSON(res, 402, { error: 'Payment required' });
-      paid.set(o.jobId, true);
+      markPaid(o.jobId);
       const pd = tierOpts('paid');
       const job = queue.add({ ...src.params, kit: true, quality: pd.quality });
       sendJSON(res, 200, { cleanJobId: job.id });
@@ -329,10 +406,27 @@ const server = http.createServer((req, res) => {
   }
 
   if (req.method === 'GET' && url.pathname.startsWith('/files/')) return serveRanged(req, res, path.join(WORK, path.basename(url.pathname)));
-  if (url.pathname === '/healthz') return sendJSON(res, 200, { ok: true, active: queue.active, payments: LIVE ? 'stripe' : 'dev' });
+  if (url.pathname === '/healthz') return sendJSON(res, 200, { ok: true, active: queue.active, payments: LIVE ? 'stripe' : 'dev', persist: DATA_OK ? 'disk' : 'memory' });
+  // Private funnel dashboard. Hidden unless FRAMECAST_STATS_KEY is set and matches.
+  if (req.method === 'GET' && url.pathname === '/api/stats') {
+    if (!STATS_KEY || url.searchParams.get('key') !== STATS_KEY) return sendJSON(res, 404, { error: 'Not found' });
+    const t = stats.totals;
+    const pct = (a, b) => b ? +(100 * a / b).toFixed(1) : 0;
+    return sendJSON(res, 200, {
+      since: stats.since,
+      funnel: { analyzed: t.analyze || 0, previews: t.preview || 0, checkouts: t.checkout || 0, paid: t.paid || 0 },
+      conversion: {
+        preview_to_checkout: pct(t.checkout || 0, t.preview || 0) + '%',
+        checkout_to_paid: pct(t.paid || 0, t.checkout || 0) + '%',
+        preview_to_paid: pct(t.paid || 0, t.preview || 0) + '%',
+      },
+      revenue_estimate_usd: +(((t.paid || 0) * (PRICING.perVideoCents / 100))).toFixed(2),
+      daily: stats.daily,
+    });
+  }
   // Flat layout: only ever serve the UI file (never expose source .js).
   return serveFile(res, path.join(PUBLIC, 'index.html'));
 });
 
-server.listen(PORT, () => console.log(`Framecast cloud on :${PORT} · payments: ${LIVE ? 'Stripe' : 'DEV mode'} · per-video ${PRICING.perVideoLabel}`));
+server.listen(PORT, () => console.log(`Framecast cloud on :${PORT} · payments: ${LIVE ? 'Stripe' : 'DEV mode'} · per-video ${PRICING.perVideoLabel} · persist: ${DATA_OK ? 'disk(' + DATA + ')' : 'MEMORY ONLY — set FRAMECAST_DATA to a writable disk'}`));
 module.exports = { server };

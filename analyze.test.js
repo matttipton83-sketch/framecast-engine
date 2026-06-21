@@ -92,5 +92,41 @@ console.log('\ndetectBlankRanges');
   ok('clean clip -> no blank ranges', A.detectBlankRanges(clean, 500).blankRanges.length === 0);
 }
 
+console.log('\nscoreOverlay');
+{
+  const tc=A.scoreOverlay({timecode:0.9,bar:0.9,play:true});
+  ok('timecode -> detected, conf .9', tc.detected && tc.confidence===0.9, JSON.stringify(tc));
+  const bp=A.scoreOverlay({bar:0.92,play:true});
+  ok('bar+play -> detected, conf .7', bp.detected && bp.confidence===0.7, JSON.stringify(bp));
+  const b=A.scoreOverlay({bar:0.92});
+  ok('lone bar -> NOT detected (too weak)', !b.detected && b.confidence===0.4, JSON.stringify(b));
+  const none=A.scoreOverlay({});
+  ok('nothing -> not detected', !none.detected && none.evidence.length===0, JSON.stringify(none));
+  ok('overlayPageFn is a function (serializable)', typeof A.overlayPageFn==='function');
+}
+
+console.log('\nisPrivateIp / classifyEgress (SSRF guard)');
+{
+  ok('10.x private', A.isPrivateIp('10.1.2.3'));
+  ok('127.0.0.1 private', A.isPrivateIp('127.0.0.1'));
+  ok('169.254.169.254 (metadata) private', A.isPrivateIp('169.254.169.254'));
+  ok('172.16.x private', A.isPrivateIp('172.16.0.1'));
+  ok('192.168.x private', A.isPrivateIp('192.168.1.1'));
+  ok('8.8.8.8 public', !A.isPrivateIp('8.8.8.8'));
+  ok('::1 private', A.isPrivateIp('::1'));
+
+  const T='file:///app/in-x.html';
+  eq('document itself -> allow', A.classifyEgress(T, T), 'allow');
+  eq('data: -> allow', A.classifyEgress('data:image/png;base64,AAA', T), 'allow');
+  eq('file: subresource -> block', A.classifyEgress('file:///etc/passwd', T), 'block');
+  eq('localhost -> block', A.classifyEgress('http://localhost:10000/x', T), 'block');
+  eq('metadata IP -> block', A.classifyEgress('http://169.254.169.254/latest/', T), 'block');
+  eq('private IP -> block', A.classifyEgress('http://10.0.0.5/x', T), 'block');
+  eq('.internal host -> block', A.classifyEgress('https://db.internal/x', T), 'block');
+  eq('public CDN -> resolve', A.classifyEgress('https://cdnjs.cloudflare.com/x.js', T), 'resolve');
+  eq('public IP -> allow', A.classifyEgress('http://8.8.8.8/x', T), 'allow');
+  eq('ftp scheme -> block', A.classifyEgress('ftp://x/y', T), 'block');
+}
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail ? 1 : 0);

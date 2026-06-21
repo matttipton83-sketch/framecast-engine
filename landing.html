@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Framecast — turn HTML animations into flawless video</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#06070e; --ink:#eef1fb; --muted:#aab3d0; --muted2:#868fb0;
+    --line:rgba(255,255,255,.09); --line2:rgba(255,255,255,.16);
+    --glass:rgba(255,255,255,.045); --panel:rgba(255,255,255,.03);
+    --grad:linear-gradient(110deg,#8b9dff,#b388ff 45%,#5ee0c0);
+    --accent:#8b9dff; --accent2:#5ee0c0;
+    --radius:22px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--ink); min-height:100vh; overflow-x:hidden; position:relative;
+    font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+    -webkit-font-smoothing:antialiased; line-height:1.5;
+  }
+  /* living aurora background */
+  .aurora{position:fixed;inset:0;overflow:hidden;pointer-events:none;z-index:0}
+  .aurora b{position:absolute;border-radius:50%;filter:blur(70px);opacity:.5;display:block}
+  .aurora .a1{width:46vw;height:46vw;left:-8vw;top:-12vw;background:radial-gradient(circle,#6d5cff,transparent 62%);animation:drift1 18s ease-in-out infinite}
+  .aurora .a2{width:42vw;height:42vw;right:-10vw;top:-2vw;background:radial-gradient(circle,#11d6b6,transparent 62%);opacity:.36;animation:drift2 22s ease-in-out infinite}
+  .aurora .a3{width:44vw;height:44vw;left:28%;bottom:-22vw;background:radial-gradient(circle,#b06cff,transparent 62%);opacity:.4;animation:drift1 26s ease-in-out infinite reverse}
+  @keyframes drift1{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(3vw,2.5vw) scale(1.12)}}
+  @keyframes drift2{0%,100%{transform:translate(0,0) scale(1)}50%{transform:translate(-3vw,2vw) scale(1.1)}}
+
+  .wrap{position:relative;z-index:1;max-width:1080px;margin:0 auto;padding:0 22px 80px}
+
+  /* nav */
+  .nav{display:flex;align-items:center;justify-content:space-between;padding:22px 4px 8px}
+  .brand{display:flex;align-items:center;gap:11px}
+  .logo{width:34px;height:34px;border-radius:10px;background:var(--grad);box-shadow:0 6px 20px rgba(124,140,255,.55);display:grid;place-items:center}
+  .logo svg{width:20px;height:auto;display:block}
+  .brand .name{font-weight:700;letter-spacing:-.3px;font-size:19px}
+  .nav .cta-mini{font-size:13px;font-weight:600;color:var(--ink);text-decoration:none;border:1px solid var(--line2);background:var(--panel);padding:9px 16px;border-radius:999px;transition:.18s}
+  .nav .cta-mini:hover{border-color:var(--accent);background:rgba(124,140,255,.12)}
+
+  /* hero */
+  .hero{text-align:center;max-width:760px;margin:40px auto 0}
+  .eyebrow{display:inline-flex;align-items:center;gap:8px;font-size:11.5px;letter-spacing:1.6px;color:#b3bcdb;
+    border:1px solid var(--line2);background:var(--panel);padding:7px 14px;border-radius:999px;
+    opacity:0;transform:translateY(10px);animation:rise .7s .15s cubic-bezier(.2,.8,.2,1) forwards}
+  .eyebrow .star{color:var(--accent2)}
+
+  /* big hero logo fly-in */
+  .herologo{width:96px;height:96px;border-radius:26px;background:var(--grad);display:grid;place-items:center;margin:26px auto 4px;
+    box-shadow:0 26px 70px rgba(124,140,255,.5);transform:translateY(-28px) scale(.4) rotate(-18deg);opacity:0;
+    animation:flyin 1s .05s cubic-bezier(.18,.9,.25,1.2) forwards}
+  .herologo svg{width:54px;height:auto;display:block}
+  .herologo::after{content:"";position:absolute;width:96px;height:96px;border-radius:26px;background:var(--grad);filter:blur(26px);opacity:0;
+    animation:glowpulse 1s .55s ease-out forwards}
+  @keyframes flyin{
+    0%{transform:translateY(-34px) scale(.4) rotate(-18deg);opacity:0}
+    55%{transform:translateY(6px) scale(1.08) rotate(4deg);opacity:1}
+    75%{transform:translateY(-2px) scale(.97) rotate(-2deg)}
+    100%{transform:translateY(0) scale(1) rotate(0);opacity:1}
+  }
+  @keyframes glowpulse{0%{opacity:.0}40%{opacity:.55}100%{opacity:0}}
+
+  h1{font-size:clamp(40px,7vw,72px);line-height:1.0;font-weight:700;letter-spacing:-2px;margin:18px 0 16px;
+    opacity:0;transform:translateY(16px);animation:rise .8s .35s cubic-bezier(.2,.8,.2,1) forwards}
+  .grad{background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .sub{font-size:clamp(15px,2.1vw,19px);line-height:1.6;color:var(--muted);max-width:540px;margin:0 auto;
+    opacity:0;transform:translateY(14px);animation:rise .8s .5s cubic-bezier(.2,.8,.2,1) forwards}
+  .trust{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:18px;margin-top:24px;font-size:12.5px;color:var(--muted2);
+    opacity:0;animation:rise .8s .65s cubic-bezier(.2,.8,.2,1) forwards}
+  .trust span{display:inline-flex;align-items:center;gap:6px}
+  .trust .tick{color:var(--accent2);font-weight:700}
+
+  /* ===== the money shot: HTML mess -> clean movie ===== */
+  .stage{position:relative;max-width:760px;margin:40px auto 0;border-radius:var(--radius);overflow:hidden;
+    border:1px solid var(--line);background:var(--glass);box-shadow:0 40px 100px rgba(0,0,0,.55);
+    backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
+    opacity:0;transform:translateY(22px) scale(.98);animation:rise .9s .8s cubic-bezier(.2,.8,.2,1) forwards}
+  .stage-head{display:flex;align-items:center;justify-content:space-between;padding:13px 18px;border-bottom:1px solid var(--line);font-size:12px;color:var(--muted2)}
+  .dots{display:flex;gap:7px}.dots i{width:10px;height:10px;border-radius:50%;background:rgba(255,255,255,.16);display:block}
+  .stage-body{position:relative;display:grid;grid-template-columns:1fr 1fr;min-height:300px}
+  @media(max-width:680px){.stage-body{grid-template-columns:1fr 1fr;min-height:230px}}
+
+  /* left: raw html (messy + stutter) */
+  .raw{position:relative;padding:20px 20px 18px;border-right:1px solid var(--line);overflow:hidden;background:rgba(8,9,18,.4)}
+  .tag{position:absolute;top:14px;left:16px;font-size:10.5px;letter-spacing:.6px;color:#ff9d9d;border:1px solid rgba(255,120,120,.35);background:rgba(255,80,80,.08);padding:4px 9px;border-radius:999px;display:flex;align-items:center;gap:6px;z-index:3}
+  .tag .rec{width:7px;height:7px;border-radius:50%;background:#ff6b6b;animation:blink 1s steps(2) infinite}
+  @keyframes blink{50%{opacity:.25}}
+  .code{margin-top:34px;font-family:'SFMono-Regular',ui-monospace,Menlo,Consolas,monospace;font-size:11.5px;line-height:1.85;color:#b9c2e6;white-space:pre;animation:jitter .14s steps(2) infinite}
+  .code .k{color:#8b9dff}.code .s{color:#5ee0c0}.code .c{color:#5a6488}
+  @keyframes jitter{0%{transform:translate(0,0)}25%{transform:translate(.6px,-.4px)}50%{transform:translate(-.5px,.5px)}75%{transform:translate(.4px,.3px)}100%{transform:translate(-.4px,-.3px)}}
+  .stutterbar{position:absolute;left:20px;right:20px;bottom:16px;height:6px;border-radius:999px;background:rgba(255,255,255,.08);overflow:hidden}
+  .stutterbar i{display:block;height:100%;width:30%;background:#ff6b6b;border-radius:999px;animation:stutter 2.4s steps(8,end) infinite}
+  @keyframes stutter{0%{width:8%}30%{width:34%}35%{width:34%}60%{width:52%}66%{width:51%}100%{width:96%}}
+
+  /* right: flawless clean video */
+  .clean{position:relative;overflow:hidden;background:radial-gradient(120% 120% at 70% 20%,rgba(94,224,192,.10),transparent 60%),#070912}
+  .tag2{position:absolute;top:14px;right:16px;font-size:10.5px;letter-spacing:.6px;color:#7df0d3;border:1px solid rgba(94,224,192,.4);background:rgba(94,224,192,.08);padding:4px 9px;border-radius:999px;display:flex;align-items:center;gap:6px;z-index:3}
+  .tag2 .ok{color:#5ee0c0;font-weight:800}
+  .scene{position:absolute;inset:0;display:grid;place-items:center}
+  .orb{width:78px;height:78px;border-radius:50%;background:var(--grad);box-shadow:0 0 50px rgba(124,140,255,.6);animation:glide 3.2s ease-in-out infinite}
+  @keyframes glide{0%,100%{transform:translate(-58px,18px) scale(.85)}50%{transform:translate(58px,-18px) scale(1.12)}}
+  .ring{position:absolute;width:150px;height:150px;border-radius:50%;border:1.5px solid rgba(139,157,255,.35);animation:spin 7s linear infinite}
+  .ring.r2{width:108px;height:108px;border-color:rgba(94,224,192,.4);animation-duration:5s;animation-direction:reverse}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .fps{position:absolute;bottom:14px;right:16px;font-size:10.5px;color:var(--muted2);font-variant-numeric:tabular-nums}
+
+  /* the capture beam that sweeps across the whole stage */
+  .beam{position:absolute;top:0;bottom:0;width:120px;left:-130px;z-index:4;pointer-events:none;
+    background:linear-gradient(90deg,transparent,rgba(139,157,255,.0) 10%,rgba(179,136,255,.35),rgba(94,224,192,.55),rgba(179,136,255,.35),transparent);
+    filter:blur(.5px);animation:sweep 4.6s cubic-bezier(.5,0,.5,1) infinite}
+  .beam::after{content:"";position:absolute;top:0;bottom:0;left:60px;width:2px;background:#cfe9ff;box-shadow:0 0 18px 5px rgba(180,200,255,.85)}
+  @keyframes sweep{0%{left:-130px}38%{left:-130px}72%{left:calc(100% + 10px)}100%{left:calc(100% + 10px)}}
+
+  /* "convert" pill that pops mid-sweep */
+  .convert{position:absolute;top:50%;left:50%;transform:translate(-50%,-50%) scale(.6);z-index:5;
+    font-size:12px;font-weight:700;color:#06070f;background:var(--grad);padding:8px 15px;border-radius:999px;
+    box-shadow:0 12px 30px rgba(124,140,255,.5);opacity:0;animation:pop 4.6s ease-in-out infinite}
+  @keyframes pop{0%,40%{opacity:0;transform:translate(-50%,-50%) scale(.6)}52%{opacity:1;transform:translate(-50%,-50%) scale(1.05)}66%{opacity:1;transform:translate(-50%,-50%) scale(1)}80%,100%{opacity:0;transform:translate(-50%,-50%) scale(.9)}}
+
+  /* ===== drag & drop — the whole point ===== */
+  .dropwrap{max-width:760px;margin:30px auto 0;opacity:0;transform:translateY(18px);animation:rise .8s 1s cubic-bezier(.2,.8,.2,1) forwards}
+  .drop{position:relative;border:1.6px dashed rgba(140,155,230,.45);border-radius:20px;
+    background:linear-gradient(180deg,rgba(124,140,255,.07),rgba(86,224,192,.035));
+    min-height:168px;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:12px;cursor:pointer;
+    padding:28px;transition:.2s;overflow:hidden}
+  .drop::before{content:"";position:absolute;inset:0;border-radius:20px;background:var(--grad);opacity:0;transition:.2s}
+  .drop:hover,.drop.drag{border-color:var(--accent);transform:translateY(-2px);box-shadow:0 24px 60px rgba(124,140,255,.22)}
+  .drop:hover::before,.drop.drag::before{opacity:.06}
+  .drop.drag{border-style:solid;box-shadow:0 0 0 5px rgba(124,140,255,.14),0 24px 60px rgba(124,140,255,.3)}
+  .drop .ico{position:relative;width:58px;height:58px;border-radius:16px;background:var(--grad);display:grid;place-items:center;
+    font-size:27px;color:#06070f;font-weight:800;box-shadow:0 12px 30px rgba(124,140,255,.5);animation:bob 2.6s ease-in-out infinite}
+  @keyframes bob{50%{transform:translateY(-7px)}}
+  .drop .big{position:relative;font-size:18px;font-weight:700;letter-spacing:-.3px}
+  .drop .sub2{position:relative;color:var(--muted2);font-size:13px;max-width:360px;line-height:1.55}
+  .drop .opens{position:relative;font-size:12px;color:var(--accent2);font-weight:600;display:flex;align-items:center;gap:6px}
+  .or{text-align:center;color:var(--muted2);font-size:12.5px;margin-top:16px}
+  .or a{color:var(--accent);text-decoration:none;font-weight:600}.or a:hover{text-decoration:underline}
+
+  /* tiny "why flawless" strip */
+  .why{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;max-width:760px;margin:46px auto 0;
+    opacity:0;transform:translateY(16px);animation:rise .8s 1.15s cubic-bezier(.2,.8,.2,1) forwards}
+  @media(max-width:680px){.why{grid-template-columns:1fr}}
+  .why .c{border:1px solid var(--line);background:var(--panel);border-radius:16px;padding:18px}
+  .why .n{width:30px;height:30px;border-radius:9px;background:rgba(124,140,255,.14);border:1px solid var(--line2);display:grid;place-items:center;font-weight:700;font-size:13px;color:var(--accent);margin-bottom:11px}
+  .why h3{margin:0 0 5px;font-size:14.5px;font-weight:600;letter-spacing:-.2px}
+  .why p{margin:0;font-size:12.5px;color:var(--muted2);line-height:1.55}
+
+  footer{text-align:center;color:var(--muted2);font-size:12.5px;margin-top:50px}
+  footer .dot{opacity:.5;margin:0 7px}
+
+  @keyframes rise{from{opacity:0;transform:translateY(18px)}to{opacity:1;transform:none}}
+  @media(prefers-reduced-motion:reduce){*{animation-duration:.001s!important;animation-iteration-count:1!important}}
+</style>
+</head>
+<body>
+  <div class="aurora"><b class="a1"></b><b class="a2"></b><b class="a3"></b></div>
+  <div class="wrap">
+
+    <nav class="nav">
+      <div class="brand"><span class="logo"><svg viewBox="0 0 1802.95 1651.52" fill="#fff" aria-hidden="true"><path d="M375.78,74.86l61.54,23.57v108.67l-66.78-27.5c-5.24-1.31-10.47-1.31-14.4,1.31-3.93,3.93-6.55,7.86-6.55,13.09v1263.5c0,5.24,2.62,9.17,6.55,13.09,3.93,2.62,9.17,2.62,14.4,1.31l66.78-26.19v107.37l-61.54,23.57c-28.81,11.78-60.23,9.17-86.42-9.17-26.19-18.33-40.59-44.52-40.59-77.25V161.27c0-32.73,14.4-58.92,40.59-77.25,26.19-18.33,57.61-20.95,86.42-9.17h0Z"/><path d="M1057.94,1004.48v-284.12l-108.67-61.54-121.77-70.7-121.77,70.7-107.36,61.54v841.9l111.29,13.09,197.71-77.25h0l518.49-206.87v-255.32l-212.11-121.77-155.81,90.34ZM1152.21,1073.88h121.77v121.77h-121.77v-121.77ZM767.27,787.13h121.77v121.77h-121.77v-121.77Z"/><path d="M127,173.06l61.54,23.57v107.36l-66.78-26.19c-5.24-1.31-10.47-1.31-14.4,1.31-3.93,3.93-6.55,7.86-6.55,13.09v1067.1c0,5.24,2.62,10.47,6.55,13.09,3.93,2.62,9.17,3.93,14.4,1.31l66.78-26.19v107.36l-61.54,24.88c-28.81,11.78-60.23,7.86-86.42-10.47-26.19-17.02-40.59-44.52-40.59-75.94V259.47c0-32.73,14.4-58.92,40.59-77.25,26.19-18.33,57.61-20.95,86.42-9.17h0Z"/><path d="M624.55,6.77l841.9,335.19c36.66,14.4,58.92,47.14,58.92,86.42v794.76c0,39.28-22.26,72.01-58.92,86.42l-841.9,335.19c-28.81,11.78-60.23,7.86-86.42-9.17-26.19-18.33-40.59-45.83-40.59-77.25V93.19c0-31.42,14.4-58.92,40.59-77.25,26.19-17.02,57.61-20.95,86.42-9.17h0ZM598.36,127.23v1398.36c0,5.24,1.31,9.17,6.55,11.78,3.93,3.93,9.17,3.93,14.4,2.62l806.55-322.09V433.61L619.31,112.83c-5.24-2.62-10.47-2.62-14.4,1.31-5.24,2.62-6.55,6.55-6.55,13.09h0Z"/><path d="M1335.52,784.51l197.71-113.91,197.71-113.91c15.71-9.17,32.73-9.17,48.45,0,14.4,7.86,23.57,23.57,23.57,40.59v456.96c0,17.02-9.17,32.73-23.57,40.59-15.71,9.17-32.73,9.17-48.45,0l-197.71-113.91-197.71-113.91c-14.4-9.17-23.57-23.57-23.57-40.59,0-18.33,9.17-32.73,23.57-41.9h0Z"/><path d="M958.43,347.2c54.99,0,99.51,45.83,99.51,100.82s-44.52,99.51-99.51,99.51-100.82-44.52-100.82-99.51,45.83-100.82,100.82-100.82h0Z"/></svg></span><span class="name">Framecast</span></div>
+      <a class="cta-mini" href="/app">Open the studio</a>
+    </nav>
+
+    <section class="hero">
+      <div class="eyebrow"><span class="star">✦</span> THE HTML-ANIMATION VIDEO STUDIO</div>
+      <div class="herologo"><svg viewBox="0 0 1802.95 1651.52" fill="#fff" aria-hidden="true"><path d="M375.78,74.86l61.54,23.57v108.67l-66.78-27.5c-5.24-1.31-10.47-1.31-14.4,1.31-3.93,3.93-6.55,7.86-6.55,13.09v1263.5c0,5.24,2.62,9.17,6.55,13.09,3.93,2.62,9.17,2.62,14.4,1.31l66.78-26.19v107.37l-61.54,23.57c-28.81,11.78-60.23,9.17-86.42-9.17-26.19-18.33-40.59-44.52-40.59-77.25V161.27c0-32.73,14.4-58.92,40.59-77.25,26.19-18.33,57.61-20.95,86.42-9.17h0Z"/><path d="M1057.94,1004.48v-284.12l-108.67-61.54-121.77-70.7-121.77,70.7-107.36,61.54v841.9l111.29,13.09,197.71-77.25h0l518.49-206.87v-255.32l-212.11-121.77-155.81,90.34ZM1152.21,1073.88h121.77v121.77h-121.77v-121.77ZM767.27,787.13h121.77v121.77h-121.77v-121.77Z"/><path d="M127,173.06l61.54,23.57v107.36l-66.78-26.19c-5.24-1.31-10.47-1.31-14.4,1.31-3.93,3.93-6.55,7.86-6.55,13.09v1067.1c0,5.24,2.62,10.47,6.55,13.09,3.93,2.62,9.17,3.93,14.4,1.31l66.78-26.19v107.36l-61.54,24.88c-28.81,11.78-60.23,7.86-86.42-10.47-26.19-17.02-40.59-44.52-40.59-75.94V259.47c0-32.73,14.4-58.92,40.59-77.25,26.19-18.33,57.61-20.95,86.42-9.17h0Z"/><path d="M624.55,6.77l841.9,335.19c36.66,14.4,58.92,47.14,58.92,86.42v794.76c0,39.28-22.26,72.01-58.92,86.42l-841.9,335.19c-28.81,11.78-60.23,7.86-86.42-9.17-26.19-18.33-40.59-45.83-40.59-77.25V93.19c0-31.42,14.4-58.92,40.59-77.25,26.19-17.02,57.61-20.95,86.42-9.17h0ZM598.36,127.23v1398.36c0,5.24,1.31,9.17,6.55,11.78,3.93,3.93,9.17,3.93,14.4,2.62l806.55-322.09V433.61L619.31,112.83c-5.24-2.62-10.47-2.62-14.4,1.31-5.24,2.62-6.55,6.55-6.55,13.09h0Z"/><path d="M1335.52,784.51l197.71-113.91,197.71-113.91c15.71-9.17,32.73-9.17,48.45,0,14.4,7.86,23.57,23.57,23.57,40.59v456.96c0,17.02-9.17,32.73-23.57,40.59-15.71,9.17-32.73,9.17-48.45,0l-197.71-113.91-197.71-113.91c-14.4-9.17-23.57-23.57-23.57-40.59,0-18.33,9.17-32.73,23.57-41.9h0Z"/><path d="M958.43,347.2c54.99,0,99.51,45.83,99.51,100.82s-44.52,99.51-99.51,99.51-100.82-44.52-100.82-99.51,45.83-100.82,100.82-100.82h0Z"/></svg></div>
+      <h1>HTML in.<br><span class="grad">Flawless video</span> out.</h1>
+      <p class="sub">Drop a Claude animation and Framecast renders it frame-perfect for YouTube, TikTok &amp; Reels. No screen recording, no stutter, no watermark when you ship.</p>
+      <div class="trust">
+        <span><span class="tick">✓</span> Frame-perfect</span>
+        <span><span class="tick">✓</span> No watermark</span>
+        <span><span class="tick">✓</span> Up to 4K</span>
+        <span><span class="tick">✓</span> GSAP · CSS · canvas · SVG</span>
+      </div>
+    </section>
+
+    <!-- the money shot -->
+    <section class="stage" aria-label="Framecast turns messy HTML into a flawless video">
+      <div class="stage-head"><div class="dots"><i></i><i></i><i></i></div><span>raw .html&nbsp;&nbsp;→&nbsp;&nbsp;flawless .mp4</span></div>
+      <div class="stage-body">
+        <div class="raw">
+          <span class="tag"><span class="rec"></span> SCREEN RECORDING · STUTTERS</span>
+<pre class="code"><span class="c">&lt;!-- your animation --&gt;</span>
+<span class="k">&lt;div</span> class=<span class="s">"scene"</span><span class="k">&gt;</span>
+  <span class="k">&lt;span</span> class=<span class="s">"orb"</span><span class="k">/&gt;</span>
+  <span class="k">&lt;svg</span> class=<span class="s">"ring"</span><span class="k">&gt;…&lt;/svg&gt;</span>
+<span class="k">&lt;/div&gt;</span>
+<span class="k">&lt;style&gt;</span>
+.orb{ <span class="s">animation</span>:glide 3s }
+@keyframes glide{ … }
+<span class="k">&lt;/style&gt;</span></pre>
+          <div class="stutterbar"><i></i></div>
+        </div>
+        <div class="clean">
+          <span class="tag2"><span class="ok">✓</span> FRAMECAST · FRAME-PERFECT</span>
+          <div class="scene">
+            <div class="ring"></div><div class="ring r2"></div>
+            <div class="orb"></div>
+          </div>
+          <span class="fps">1920×1080 · 60fps</span>
+        </div>
+        <div class="beam"></div>
+        <div class="convert">Rendering every frame…</div>
+      </div>
+    </section>
+
+    <!-- drag & drop -->
+    <div class="dropwrap">
+      <div class="drop" id="drop">
+        <div class="ico">↑</div>
+        <div class="big">Drop your animation to begin</div>
+        <div class="sub2">An <b>.html</b> file or a Claude artifact — GSAP, CSS, canvas &amp; SVG all supported.</div>
+        <div class="opens">→ opens straight in the studio with your file loaded</div>
+        <input type="file" id="file" accept=".html,.htm" hidden>
+      </div>
+      <div class="or">or <a href="/app">open an empty studio</a> · one-time $2.99 per video, no subscription</div>
+    </div>
+
+    <!-- why flawless -->
+    <section class="why">
+      <div class="c"><div class="n">1</div><h3>Virtual clock</h3><p>We run your animation on a deterministic clock and seek it frame by frame — so nothing is left to a laggy real-time recorder.</p></div>
+      <div class="c"><div class="n">2</div><h3>Every frame captured</h3><p>Each frame is screenshotted at full resolution and encoded straight to MP4. No dropped frames, no broken CSS.</p></div>
+      <div class="c"><div class="n">3</div><h3>One drop, every format</h3><p>Get YouTube 16:9, Vertical 9:16 and Square 1:1 from a single drop — smart-reframed with no black bars.</p></div>
+    </section>
+
+    <footer>Framecast<span class="dot">·</span>frame-perfect capture<span class="dot">·</span>no watermark when you ship</footer>
+  </div>
+
+<script>
+  // Drop a file -> stash it -> open the studio with the animation already loaded.
+  // In production the studio lives at /app; for a local file:// preview we fall
+  // back to the studio file sitting next to this page.
+  var STUDIO = (location.protocol === 'file:') ? 'index.html' : '/app';
+  var drop = document.getElementById('drop');
+  var fileInput = document.getElementById('file');
+
+  function handoff(file){
+    if(!file) return;
+    var r = new FileReader();
+    r.onload = function(){
+      try{
+        sessionStorage.setItem('fc_pending_html', r.result);
+        sessionStorage.setItem('fc_pending_name', file.name.replace(/\.[^.]+$/,''));
+      }catch(e){}
+      window.location.href = STUDIO;
+    };
+    r.readAsText(file);
+  }
+
+  drop.addEventListener('click', function(){ fileInput.click(); });
+  fileInput.addEventListener('change', function(e){ handoff(e.target.files[0]); });
+  ['dragover','dragenter'].forEach(function(ev){
+    drop.addEventListener(ev, function(e){ e.preventDefault(); drop.classList.add('drag'); });
+  });
+  ['dragleave','dragend'].forEach(function(ev){
+    drop.addEventListener(ev, function(e){ e.preventDefault(); drop.classList.remove('drag'); });
+  });
+  drop.addEventListener('drop', function(e){
+    e.preventDefault(); drop.classList.remove('drag');
+    var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    handoff(f);
+  });
+  // Allow dropping a file anywhere on the page (don't let the browser navigate to it).
+  window.addEventListener('dragover', function(e){ e.preventDefault(); });
+  window.addEventListener('drop', function(e){
+    e.preventDefault();
+    if(e.target.closest && e.target.closest('#drop')) return;
+    var f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if(f) handoff(f);
+  });
+</script>
+</body>
+</html>
