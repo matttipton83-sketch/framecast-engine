@@ -581,8 +581,15 @@ async function analyze(opts) {
     durationSec = Math.min(durationSec, HARD_CAP_SEC);
 
     // --- play-bar / video-UI overlay detection (DOM heuristic) ---
+    // Detect at MID-playback: the duration probe leaves the clock at the end,
+    // where a fake player UI has usually finished/disappeared. Seek to ~40% so the
+    // scrubber + timecode ("0:24 / 1:00") are on screen.
     let overlay = { detected: false };
-    try { overlay = await page.evaluate(overlayPageFn, { mode: 'detect' }); } catch (e) {}
+    try {
+      const midMs = Math.max(500, Math.min((durationSec || 10) * 1000 * 0.4, (durationSec || 10) * 1000 - 200));
+      await page.evaluate((tt) => { try { window.__framecast.tick(tt); window.__framecast.seekDeclarative(tt); } catch (e) {} }, midMs);
+      overlay = await page.evaluate(overlayPageFn, { mode: 'detect' });
+    } catch (e) {}
 
     return { preset, label: P.label, width: P.width, height: P.height, aspectRatio: +aspectRatio.toFixed(4), durationSec, durSource, loop, blanks, overlay, info };
   } finally {
