@@ -232,8 +232,79 @@ function detectBlankRanges(signatures, stepMs, opts = {}) {
   return out;
 }
 
+// ----------------------------------------------------------------------------
+// Overlay / play-bar detection (pure scorer + injectable page function)
+// ----------------------------------------------------------------------------
+
+// Pure decision table over the raw DOM signals (unit-testable). A baked-in fake
+// video player is given away by a timecode label ("0:19 / 1:00"); a wide thin
+// progress bar and a play glyph corroborate it. Timecode alone is high
+// confidence; bar+play is medium; a lone bar is too weak to act on.
+function scoreOverlay({ timecode, bar, play } = {}) {
+  const evidence = [];
+  if (timecode) evidence.push('timecode');
+  if (bar) evidence.push('progress-bar');
+  if (play) evidence.push('play-glyph');
+  let detected = false, confidence = 0;
+  if (timecode) { detected = true; confidence = 0.9; }
+  else if (bar && play) { detected = true; confidence = 0.7; }
+  else if (bar) { detected = false; confidence = 0.4; }
+  return { detected, confidence, evidence };
+}
+
+// Self-contained function injected into the page (Playwright serializes it).
+// mode:'detect' -> returns a verdict for the confirm card.
+// mode:'hide'   -> tags the player-chrome elements so they vanish, and keeps
+//                  them hidden across the animation's re-renders via a style rule
+//                  + MutationObserver. Only DOM-built bars are found (a canvas-
+//                  painted bar exposes no timecode text), and those are exactly
+//                  the ones we can cleanly remove.
+function overlayPageFn(arg) {
+  var mode = (arg && arg.mode) || 'detect';
+  var W = window.innerWidth, H = window.innerHeight, bandTop = H * 0.78;
+  var reTC = /\b\d{1,2}:\d{2}\s*\/\s*\d{1,2}:\d{2}\b/;
+  function scan() {
+    var all = document.body ? document.body.querySelectorAll('*') : [];
+    var tc = null, bar = null, play = null;
+    for (var i = 0; i < all.length; i++) {
+      var el = all[i]; var r = el.getBoundingClientRect();
+      if (r.width < 2 || r.height < 2) continue;
+      if (r.bottom < bandTop) continue;
+      var t = (el.textContent || '').trim();
+      if (!tc && t && t.length <= 24 && reTC.test(t)) tc = el;
+      if (!bar && r.width > W * 0.5 && r.height > 1 && r.height < H * 0.05 && r.top > bandTop) bar = el;
+      if (!play && r.width > 6 && r.height > 6 && r.width < H * 0.09 && r.height < H * 0.09 && r.left < W * 0.30 && r.top > bandTop) play = el;
+    }
+    return { tc: tc, bar: bar, play: play };
+  }
+  function chromeOf(s) {
+    if (s.tc) { var n = s.tc; for (var i = 0; i < 6 && n && n !== document.body; i++) { var r = n.getBoundingClientRect(); if (r.width > W * 0.4 && r.top > bandTop) return n; n = n.parentElement; } return s.tc; }
+    if (s.bar) { var p = s.bar.parentElement; if (p && p.getBoundingClientRect().top > bandTop) return p; return s.bar; }
+    return null;
+  }
+  var s = scan();
+  if (mode === 'hide') {
+    if (!document.getElementById('__fc_ov_style')) {
+      var st = document.createElement('style'); st.id = '__fc_ov_style';
+      st.textContent = '[data-fc-ov-hide]{display:none!important;visibility:hidden!important;opacity:0!important;pointer-events:none!important}';
+      (document.head || document.documentElement).appendChild(st);
+    }
+    var mark = function () { var ss = scan(); [chromeOf(ss), ss.bar, ss.play, ss.tc].forEach(function (el) { if (el && el.setAttribute) el.setAttribute('data-fc-ov-hide', '1'); }); };
+    mark();
+    if (!window.__fc_ov_obs) { try { window.__fc_ov_obs = new MutationObserver(function () { mark(); }); window.__fc_ov_obs.observe(document.body, { childList: true, subtree: true }); } catch (e) {} }
+    return { hidden: true };
+  }
+  var ev = []; if (s.tc) ev.push('timecode'); if (s.bar) ev.push('progress-bar'); if (s.play) ev.push('play-glyph');
+  var ch = chromeOf(s); var y = 0.9;
+  if (ch) { y = Math.max(0, Math.min(1, ch.getBoundingClientRect().top / H)); }
+  else if (s.bar) { y = s.bar.getBoundingClientRect().top / H; }
+  var detected = false, conf = 0;
+  if (s.tc) { detected = true; conf = 0.9; } else if (s.bar && s.play) { detected = true; conf = 0.7; } else if (s.bar) { detected = false; conf = 0.4; }
+  return { detected: detected, confidence: conf, removable: !!ch, kind: 'dom', y: Math.round(y * 1000) / 1000, evidence: ev, box: { x: 0, y: Math.round(y * 1000) / 1000, w: 1, h: Math.round((1 - y) * 1000) / 1000 } };
+}
+
 module.exports = {
   aHashFromGray, hamming, popcount, rgbaTo8x8Gray, frameSignature,
-  findLoopPeriod, detectBlankRanges, median,
+  findLoopPeriod, detectBlankRanges, median, scoreOverlay, overlayPageFn,
   LOOP_DEFAULTS, BLANK_DEFAULTS,
 };

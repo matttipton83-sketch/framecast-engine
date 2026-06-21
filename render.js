@@ -13,7 +13,7 @@ const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const { PRESETS, QUALITY } = require('./presets');
-const { findLoopPeriod, detectBlankRanges, frameSignature } = require('./analyze');
+const { findLoopPeriod, detectBlankRanges, frameSignature, overlayPageFn } = require('./analyze');
 const virtualTimeScript = require('./virtual-time');
 
 const HARD_CAP_SEC = 75; // product ceiling: 1:15
@@ -388,6 +388,12 @@ async function render(opts) {
   });
   ffmpegDone.catch(() => {}); // never an "unhandled" rejection (would crash the process)
 
+  // Optional: remove a baked-in play-bar / fake video-player UI before capture.
+  // Tags the chrome elements (display:none) and keeps them hidden across the
+  // animation's re-renders via an injected style rule + MutationObserver. Only
+  // DOM-built bars are targeted; the animation itself is untouched.
+  if (opts.removeOverlay) { try { await page.evaluate(overlayPageFn, { mode: 'hide' }); } catch (_) {} }
+
   // Capture via the raw DevTools protocol — skips Playwright's per-screenshot
   // overhead (stability checks, marshalling), a meaningful per-frame win over
   // thousands of frames. Falls back to page.screenshot for transparent output
@@ -574,7 +580,11 @@ async function analyze(opts) {
     if (!durationSec) { durationSec = 15; durSource = 'default'; }
     durationSec = Math.min(durationSec, HARD_CAP_SEC);
 
-    return { preset, label: P.label, width: P.width, height: P.height, aspectRatio: +aspectRatio.toFixed(4), durationSec, durSource, loop, blanks, info };
+    // --- play-bar / video-UI overlay detection (DOM heuristic) ---
+    let overlay = { detected: false };
+    try { overlay = await page.evaluate(overlayPageFn, { mode: 'detect' }); } catch (e) {}
+
+    return { preset, label: P.label, width: P.width, height: P.height, aspectRatio: +aspectRatio.toFixed(4), durationSec, durSource, loop, blanks, overlay, info };
   } finally {
     try { await browser.close(); } catch (_) {}
   }

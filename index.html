@@ -423,7 +423,7 @@ const FORMATS=[
   {id:'square-1080',name:'Square',dim:'1080×1080 · 1:1'},
   {id:'gif',name:'GIF',dim:'animated loop'},
 ];
-let state={preset:'auto',quality:'high',dur:0,html:null,fname:null};
+let state={preset:'auto',quality:'high',dur:0,html:null,fname:null,removeOverlay:false};
 (function(){const q=new URLSearchParams(location.search);if(q.has('api')){const v=q.get('api').replace(/\/$/,'');if(v)localStorage.setItem('fc_api',v);else localStorage.removeItem('fc_api');}})();
 const API=localStorage.getItem('fc_api')||'';
 const abs=u=>(!u?u:(/^https?:\/\//.test(u)?u:API+u));
@@ -441,7 +441,7 @@ $('#clear').onclick=e=>{e.stopPropagation();reset();};
 $('#again').onclick=reset;
 function hydrate(html,name){state.html=html;state.fname=(name||'animation').replace(/\.[^.]+$/,'');$('#fname').textContent=(state.fname)+'.html';$('#empty').classList.add('hide');$('#loaded').classList.add('show');$('#preview').srcdoc=html;$('#export').disabled=false;$('#exhint').textContent='Analyzing your animation…';analyzeFile();}
 function loadFile(f){const r=new FileReader();r.onload=()=>hydrate(r.result,f.name);r.readAsText(f);}
-function reset(){try{history.replaceState({},'',location.pathname);}catch(e){}state.html=null;analyzeSeq++;var _dc=$('#detect');if(_dc){_dc.style.display='none';_dc.innerHTML='';}$('#empty').classList.remove('hide');$('#loaded').classList.remove('show');$('#preview').srcdoc='';$('#export').disabled=true;$('#exhint').textContent='Drop a file to begin';$('#bar').classList.remove('show');$('#result').classList.remove('show');$('#kit').classList.remove('show');$('#ractions').classList.remove('show');$('#status').textContent='';}
+function reset(){try{history.replaceState({},'',location.pathname);}catch(e){}state.html=null;state.removeOverlay=false;analyzeSeq++;var _dc=$('#detect');if(_dc){_dc.style.display='none';_dc.innerHTML='';}$('#empty').classList.remove('hide');$('#loaded').classList.remove('show');$('#preview').srcdoc='';$('#export').disabled=true;$('#exhint').textContent='Drop a file to begin';$('#bar').classList.remove('show');$('#result').classList.remove('show');$('#kit').classList.remove('show');$('#ractions').classList.remove('show');$('#status').textContent='';}
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 let lastJobId=null;
 /* ---- detect-and-confirm: analyze the dropped file, pre-fill format + length ---- */
@@ -452,12 +452,15 @@ function applyDetected(d){
   if(d.durationSec>0){state.dur=Math.min(75,Math.round(d.durationSec));$('#dur').value=state.dur;$('#durval').textContent=state.dur+'s';}
   const looping=d.loop&&d.loop.detected;
   const why=({declared:'length set in your file',css:'from your animation timeline',gsap:'from your animation timeline',loop:'detected a loop — one clean cycle',settle:'measured when motion stops',default:'best guess'})[d.durSource]||'auto-detected';
+  const ov=d.overlay&&d.overlay.detected;
   const c=$('#detect');c.style.display='block';
   c.innerHTML='<div style="font-weight:700;margin-bottom:3px">✓ Here’s what we found</div>'
     +'<div style="opacity:.92">Format <b>'+(d.label||d.preset)+'</b> &middot; Length <b>'+state.dur+'s</b>'
     +(looping?' <span style="opacity:.8">&middot; looping ad (one clean cycle)</span>':'')+'</div>'
-    +'<div style="opacity:.6;font-size:.86em;margin-top:5px">Filled in below from your file ('+why+'). Change anything, then export.</div>';
+    +'<div style="opacity:.6;font-size:.86em;margin-top:5px">Filled in below from your file ('+why+'). Change anything, then export.</div>'
+    +(ov?'<div style="margin-top:9px;padding-top:9px;border-top:1px solid rgba(140,160,255,.18)"><div style="opacity:.92">A video-player bar (play &amp; timecode) looks baked into your animation near the bottom.</div><label style="display:inline-flex;align-items:center;gap:8px;margin-top:6px;cursor:pointer"><input type="checkbox" id="ovchk"'+(state.removeOverlay?' checked':'')+'> <span>Remove it from the export</span></label></div>':'');
   $('#exhint').textContent='Detected '+(d.label||d.preset)+' · '+state.dur+'s — export when ready';
+  const chk=document.getElementById('ovchk');if(chk)chk.onchange=function(e){state.removeOverlay=e.target.checked;};
 }
 async function analyzeFile(){
   const myseq=++analyzeSeq;const html=state.html;if(!html)return;
@@ -515,7 +518,7 @@ $('#export').onclick=async()=>{
   $('#result').classList.remove('show');$('#kit').classList.remove('show');$('#ractions').classList.remove('show');$('#freebox').style.display='none';$('#status').textContent='Submitting…';
   RM.start('Rendering your preview');
   try{
-    const j=await jfetch(API+'/api/jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({html:state.html,name:state.fname,preset:state.preset,durationSec:state.dur||undefined})});
+    const j=await jfetch(API+'/api/jobs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({html:state.html,name:state.fname,preset:state.preset,durationSec:state.dur||undefined,removeOverlay:state.removeOverlay})});
     lastJobId=j.jobId;if(j.price)$('#price').textContent=j.price;
     const st=await pollJob(lastJobId,'Capturing');
     RM.done(()=>{ $('#status').textContent=`${st.durationSec}s teaser ready · ${st.width}×${st.height} — unlock the full clip below`; showVideo(st);$('#freebox').style.display='block'; });
