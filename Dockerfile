@@ -1,6 +1,6 @@
 # Framecast engine — flat repo, one Dockerfile at the root.
 # Playwright base image ships Chromium + every system library it needs.
-FROM mcr.microsoft.com/playwright:v1.49.0-jammy
+FROM mcr.microsoft.com/playwright:v1.61.0-jammy
 
 # Full ffmpeg (includes the drawtext filter for watermarks — the stripped-down
 # ffmpeg-static binary does NOT) plus DejaVu fonts for the watermark text.

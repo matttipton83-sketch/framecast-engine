@@ -313,14 +313,7 @@ function overlayPageFn(arg) {
   if (rr && sH > 0) y = Math.max(0, Math.min(1, (rr.top - S.top) / sH));
   var detected = false, conf = 0;
   if (s.tc) { detected = true; conf = 0.9; } else if (s.bar && s.play) { detected = true; conf = 0.7; } else if (s.bar) { detected = false; conf = 0.4; }
-  // debug: what the stage's bottom band actually contains (for tuning)
-  var dbg = { stage: { x: Math.round(S.left), y: Math.round(S.top), w: Math.round(sW), h: Math.round(sH), vw: W, vh: H }, band: [] };
-  try {
-    var a2 = document.body ? document.body.querySelectorAll('*') : [];
-    for (var j = 0; j < a2.length; j++) { var e2 = a2[j]; var r2 = e2.getBoundingClientRect(); if (r2.bottom > bandTop && r2.top < sB + 4 && r2.width > 8 && r2.height > 2) dbg.band.push({ tag: e2.tagName, t: (e2.textContent || '').trim().slice(0, 18), w: Math.round(r2.width), h: Math.round(r2.height), y: Math.round(((r2.top - S.top) / sH) * 100) / 100 }); }
-    dbg.band = dbg.band.slice(0, 14);
-  } catch (e) {}
-  return { detected: detected, confidence: conf, removable: !!ch, kind: 'dom', y: Math.round(y * 1000) / 1000, evidence: ev, box: { x: 0, y: Math.round(y * 1000) / 1000, w: 1, h: Math.round((1 - y) * 1000) / 1000 }, debug: dbg };
+  return { detected: detected, confidence: conf, removable: !!ch, kind: 'dom', y: Math.round(y * 1000) / 1000, evidence: ev, box: { x: 0, y: Math.round(y * 1000) / 1000, w: 1, h: Math.round((1 - y) * 1000) / 1000 } };
 }
 
 // ----------------------------------------------------------------------------

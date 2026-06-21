@@ -642,13 +642,13 @@ async function analyze(opts) {
       if (!overlay.detected) {
         const frame = await page.screenshot({ type: 'jpeg', quality: 70 });
         const v = (await visionDetectOverlay(frame)) || {};
-        overlay.vision = { status: v.status, present: v.present, conf: v.confidence, note: v.note };
+        overlay.vision = { status: v.status, conf: v.confidence }; // lightweight ops signal
         if (v.present && v.confidence >= 0.5) {
           const yy = +(+v.yFraction).toFixed(3);
           overlay = { detected: true, confidence: v.confidence, kind: 'vision', removable: false, y: yy, evidence: ['vision'], box: { x: 0, y: yy, w: 1, h: +(1 - yy).toFixed(3) }, vision: { status: v.status, conf: v.confidence } };
         }
       }
-    } catch (e) { overlay.vision = { status: 'exception', note: String((e && e.message) || e).slice(0, 120) }; }
+    } catch (e) { overlay.vision = { status: 'exception' }; }
 
     return { preset, label: P.label, width: P.width, height: P.height, aspectRatio: +aspectRatio.toFixed(4), durationSec, durSource, loop, blanks, overlay, info };
   } finally {

@@ -8,7 +8,7 @@
     "check": "node --check server.js && node --check render.js && node --check analyze.js && node --check queue.js && node --check tiers.js && node --check payments.js"
   },
   "dependencies": {
-    "playwright": "1.49.0",
+    "playwright": "1.61.0",
     "ffmpeg-static": "^5.2.0",
     "jpeg-js": "0.4.4"
   },
