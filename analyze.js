@@ -15,6 +15,8 @@
 
 'use strict';
 
+const net = require('net');
+
 // ----------------------------------------------------------------------------
 // Perceptual hashing (pure)
 // ----------------------------------------------------------------------------
@@ -321,8 +323,51 @@ function overlayPageFn(arg) {
   return { detected: detected, confidence: conf, removable: !!ch, kind: 'dom', y: Math.round(y * 1000) / 1000, evidence: ev, box: { x: 0, y: Math.round(y * 1000) / 1000, w: 1, h: Math.round((1 - y) * 1000) / 1000 }, debug: dbg };
 }
 
+// ----------------------------------------------------------------------------
+// Network egress guard (pure classifier) — used by render.js page.route to keep a
+// malicious uploaded animation from reaching internal/cloud-metadata/localhost
+// addresses (SSRF). Public hosts are allowed so real artifacts can load CDNs.
+// ----------------------------------------------------------------------------
+
+// Is this resolved IP literal in a private / loopback / link-local / CGNAT range?
+function isPrivateIp(ip) {
+  if (!ip) return false;
+  if (net.isIPv4(ip)) {
+    const p = ip.split('.').map(Number);
+    if (p[0] === 0 || p[0] === 10 || p[0] === 127) return true;          // this-host, private, loopback
+    if (p[0] === 172 && p[1] >= 16 && p[1] <= 31) return true;          // private
+    if (p[0] === 192 && p[1] === 168) return true;                      // private
+    if (p[0] === 169 && p[1] === 254) return true;                      // link-local + cloud metadata
+    if (p[0] === 100 && p[1] >= 64 && p[1] <= 127) return true;         // CGNAT
+    return false;
+  }
+  const s = String(ip).toLowerCase();
+  if (s === '::1' || s === '::') return true;                           // loopback / unspecified
+  if (s.startsWith('fe80') || s.startsWith('fc') || s.startsWith('fd')) return true; // link-local / ULA
+  if (s.startsWith('::ffff:')) { const v4 = s.split(':').pop(); if (net.isIPv4(v4)) return isPrivateIp(v4); }
+  return false;
+}
+
+// Decide what to do with a sub-request URL from the rendered page:
+//   'allow'   -> let it through (the document itself, data:/blob:, public hosts)
+//   'block'   -> abort (file: subresources, localhost/metadata/.internal, private IPs)
+//   'resolve' -> a public-looking hostname; caller must DNS-resolve and re-check
+function classifyEgress(url, target) {
+  if (!url) return 'block';
+  if (url === target || url.startsWith('data:') || url.startsWith('blob:') || url.startsWith('about:')) return 'allow';
+  let u; try { u = new URL(url); } catch (e) { return 'block'; }
+  if (u.protocol === 'file:') return 'block';                          // no reading other local files
+  if (u.protocol !== 'http:' && u.protocol !== 'https:') return 'block';
+  let host = u.hostname; if (host.startsWith('[') && host.endsWith(']')) host = host.slice(1, -1);
+  if (/^(localhost|metadata\.google\.internal)$/i.test(host)) return 'block';
+  if (/\.(internal|local|localdomain)$/i.test(host)) return 'block';
+  if (net.isIP(host)) return isPrivateIp(host) ? 'block' : 'allow';
+  return 'resolve';
+}
+
 module.exports = {
   aHashFromGray, hamming, popcount, rgbaTo8x8Gray, frameSignature,
   findLoopPeriod, detectBlankRanges, median, scoreOverlay, overlayPageFn,
+  isPrivateIp, classifyEgress,
   LOOP_DEFAULTS, BLANK_DEFAULTS,
 };

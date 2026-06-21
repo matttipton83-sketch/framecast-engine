@@ -13,10 +13,33 @@ const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const { PRESETS, QUALITY } = require('./presets');
-const { findLoopPeriod, detectBlankRanges, frameSignature, overlayPageFn } = require('./analyze');
+const dns = require('dns').promises;
+const { findLoopPeriod, detectBlankRanges, frameSignature, overlayPageFn, classifyEgress, isPrivateIp } = require('./analyze');
 const virtualTimeScript = require('./virtual-time');
 
 const HARD_CAP_SEC = 75; // product ceiling: 1:15
+const MAX_JOB_MS = Number(process.env.FRAMECAST_MAX_JOB_MS || 240000); // hard kill: a single job can't run longer than this
+
+// SSRF guard: block the rendered (untrusted) page from reaching internal /
+// cloud-metadata / localhost / private-network addresses. Public hosts are
+// allowed so legitimate artifacts can still load their CDNs/fonts. file:
+// subresources are blocked so a page can't read other local files.
+function installNetGuard(page, target) {
+  return page.route('**/*', async (route) => {
+    try {
+      const url = route.request().url();
+      const verdict = classifyEgress(url, target);
+      if (verdict === 'allow') return route.continue();
+      if (verdict === 'block') return route.abort();
+      // 'resolve': public-looking hostname — DNS-resolve and block if it maps to a private IP
+      try {
+        const addrs = await dns.lookup(new URL(url).hostname, { all: true });
+        if (addrs.some((a) => isPrivateIp(a.address))) return route.abort();
+      } catch (e) { /* DNS error -> fail open (literal-IP + metadata cases already blocked) */ }
+      return route.continue();
+    } catch (e) { try { return route.continue(); } catch (_) {} }
+  });
+}
 
 // Recursively find the first .ttf/.otf under a directory (last-resort fallback).
 function scanForFont(dir, depth = 0) {
@@ -205,6 +228,7 @@ async function render(opts) {
   const outputDir = outDir || (isUrl ? process.cwd() : path.dirname(input));
 
   const browser = await chromium.launch({ args: ['--force-color-profile=srgb', '--disable-lcd-text'] });
+  const killTimer = setTimeout(() => { try { browser.close(); } catch (_) {} }, MAX_JOB_MS); // hard kill on runaway uploads
   // Probe at a neutral 16:9 viewport first; we'll resize once we know the format.
   const page = await browser.newPage({
     viewport: { width: 1920, height: 1080 },
@@ -215,6 +239,7 @@ async function render(opts) {
   await page.addInitScript(virtualTimeScript());
 
   const target = isUrl ? input : 'file://' + path.resolve(input);
+  await installNetGuard(page, target); // SSRF guard before any navigation
   // Don't block on slow/blocked external resources (e.g. web fonts). Get the DOM
   // and scripts running fast, then give the page a brief, bounded settle window.
   try {
@@ -447,6 +472,7 @@ async function render(opts) {
     try { ffmpeg.stdin.end(); } catch (_) {}
     await ffmpegDone;
   } finally {
+    clearTimeout(killTimer);
     try { await browser.close(); } catch (_) {}
   }
 
@@ -537,9 +563,11 @@ async function analyze(opts) {
   const isUrl = /^https?:\/\//i.test(input);
   const target = isUrl ? input : 'file://' + path.resolve(input);
   const browser = await chromium.launch({ args: ['--force-color-profile=srgb', '--disable-lcd-text'] });
+  const killTimer = setTimeout(() => { try { browser.close(); } catch (_) {} }, MAX_JOB_MS); // hard kill on runaway uploads
   try {
     const page = await browser.newPage({ viewport: { width: 1920, height: 1080 }, deviceScaleFactor: 1 });
     await page.addInitScript(virtualTimeScript());
+    await installNetGuard(page, target); // SSRF guard before any navigation
     try { await page.goto(target, { waitUntil: 'domcontentloaded', timeout: 20000 }); }
     catch (e) { try { await page.goto(target, { waitUntil: 'commit', timeout: 20000 }); } catch (_) {} }
     await Promise.race([
@@ -624,6 +652,7 @@ async function analyze(opts) {
 
     return { preset, label: P.label, width: P.width, height: P.height, aspectRatio: +aspectRatio.toFixed(4), durationSec, durSource, loop, blanks, overlay, info };
   } finally {
+    clearTimeout(killTimer);
     try { await browser.close(); } catch (_) {}
   }
 }

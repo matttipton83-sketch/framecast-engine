@@ -17,5 +17,9 @@ COPY package.json ./
 RUN npm install --omit=dev
 COPY . .
 
+# Drop root: run as the non-privileged user the Playwright image ships with, so a
+# browser-sandbox escape can't land as root. WORK dir lives under /tmp (writable).
+USER pwuser
+
 EXPOSE 8080
 CMD ["node", "server.js"]

@@ -27,6 +27,25 @@ const MAX_HTML_BYTES = Number(process.env.FRAMECAST_MAX_HTML || 8 * 1024 * 1024)
 const SOURCE_TTL = 1000 * 60 * 60 * 6; // keep source 6h so a buyer can unlock later
 fs.mkdirSync(WORK, { recursive: true });
 
+// Lightweight in-memory per-IP rate limiting to deter abuse/DoS of the free,
+// unauthenticated endpoints (each render launches a browser; each hard file may
+// trigger a Claude call). Fixed window; tune via env.
+const RATE_MAX = Number(process.env.FRAMECAST_RATE_MAX || 30);            // requests...
+const RATE_WINDOW_MS = Number(process.env.FRAMECAST_RATE_WINDOW_MS || 60000); // ...per this window
+const rate = new Map(); // ip -> { n, reset }
+setInterval(() => { const now = Date.now(); for (const [k, v] of rate) if (now > v.reset) rate.delete(k); }, RATE_WINDOW_MS).unref?.();
+function clientIp(req) {
+  const xf = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+  return xf || (req.socket && req.socket.remoteAddress) || 'unknown';
+}
+function rateLimited(req) {
+  const ip = clientIp(req); const now = Date.now();
+  let e = rate.get(ip);
+  if (!e || now > e.reset) { e = { n: 0, reset: now + RATE_WINDOW_MS }; rate.set(ip, e); }
+  e.n++;
+  return e.n > RATE_MAX;
+}
+
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css',
   '.mp4': 'video/mp4', '.webm': 'video/webm', '.gif': 'image/gif', '.json': 'application/json' };
 
@@ -192,6 +211,7 @@ const server = http.createServer((req, res) => {
 
   // Handoff: landing stashes an uploaded HTML file, studio fetches it by id.
   if (req.method === 'POST' && url.pathname === '/api/stash') {
+    if (rateLimited(req)) return sendJSON(res, 429, { error: 'Too many requests — please slow down and try again shortly.' });
     return readBody(req, (body) => {
       if (body === null) return sendJSON(res, 413, { error: 'File too large' });
       let o; try { o = JSON.parse(body); } catch { return sendJSON(res, 400, { error: 'Bad JSON' }); }
@@ -212,6 +232,7 @@ const server = http.createServer((req, res) => {
   //    WITHOUT rendering, so the studio can show "here's what we found" and let
   //    the user confirm/adjust before paying. Poll /api/jobs/:id for the result.
   if (req.method === 'POST' && url.pathname === '/api/analyze') {
+    if (rateLimited(req)) return sendJSON(res, 429, { error: 'Too many requests — please slow down and try again shortly.' });
     return readBody(req, (body) => {
       if (body === null) return sendJSON(res, 413, { error: 'File too large' });
       let o; try { o = JSON.parse(body); } catch { return sendJSON(res, 400, { error: 'Bad JSON' }); }
@@ -223,6 +244,7 @@ const server = http.createServer((req, res) => {
 
   // 1) Free preview render
   if (req.method === 'POST' && url.pathname === '/api/jobs') {
+    if (rateLimited(req)) return sendJSON(res, 429, { error: 'Too many requests — please slow down and try again shortly.' });
     return readBody(req, (body) => {
       if (body === null) return sendJSON(res, 413, { error: 'File too large' });
       let o; try { o = JSON.parse(body); } catch { return sendJSON(res, 400, { error: 'Bad JSON' }); }
