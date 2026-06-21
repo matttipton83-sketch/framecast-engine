@@ -605,14 +605,16 @@ async function analyze(opts) {
     // key is configured. The page is already seeked to mid-playback above, so we
     // grab that frame and ask Claude. A vision hit can't be DOM-hidden (it's
     // SVG/canvas/dynamic) -> mark it for crop removal.
-    if (!overlay.detected && process.env.ANTHROPIC_API_KEY) {
+    if (!overlay.detected) {
       try {
         const frame = await page.screenshot({ type: 'jpeg', quality: 70 });
-        const v = await visionDetectOverlay(frame);
-        if (v && v.present && v.confidence >= 0.5) {
-          overlay = { detected: true, confidence: v.confidence, kind: 'vision', removable: false, y: +v.yFraction.toFixed(3), evidence: ['vision'], box: { x: 0, y: +v.yFraction.toFixed(3), w: 1, h: +(1 - v.yFraction).toFixed(3) } };
+        const v = (await visionDetectOverlay(frame)) || {};
+        overlay.vision = { status: v.status, present: v.present, conf: v.confidence, note: v.note };
+        if (v.present && v.confidence >= 0.5) {
+          const yy = +(+v.yFraction).toFixed(3);
+          overlay = { detected: true, confidence: v.confidence, kind: 'vision', removable: false, y: yy, evidence: ['vision'], box: { x: 0, y: yy, w: 1, h: +(1 - yy).toFixed(3) }, vision: { status: v.status, conf: v.confidence } };
         }
-      } catch (e) {}
+      } catch (e) { overlay.vision = { status: 'exception', note: String((e && e.message) || e).slice(0, 120) }; }
     }
 
     return { preset, label: P.label, width: P.width, height: P.height, aspectRatio: +aspectRatio.toFixed(4), durationSec, durSource, loop, blanks, overlay, info };
@@ -637,7 +639,8 @@ const VISION_PROMPT =
 
 async function visionDetectOverlay(jpegBuffer) {
   const key = process.env.ANTHROPIC_API_KEY;
-  if (!key || !jpegBuffer || !jpegBuffer.length) return null;
+  if (!key) return { present: false, status: 'no-key' };
+  if (!jpegBuffer || !jpegBuffer.length) return { present: false, status: 'no-frame' };
   try {
     const body = {
       model: process.env.FRAMECAST_VISION_MODEL || 'claude-haiku-4-5-20251001',
@@ -654,14 +657,14 @@ async function visionDetectOverlay(jpegBuffer) {
       headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
       body: JSON.stringify(body),
     }).finally(() => clearTimeout(to));
-    if (!r.ok) return null;
+    if (!r.ok) { const t = await r.text().catch(() => ''); return { present: false, status: 'http-' + r.status, note: String(t).slice(0, 160) }; }
     const j = await r.json();
     const txt = (j.content && j.content[0] && j.content[0].text) || '';
     const m = txt.match(/\{[\s\S]*\}/);
-    if (!m) return null;
+    if (!m) return { present: false, status: 'parse-fail', note: txt.slice(0, 160) };
     const o = JSON.parse(m[0]);
-    return { present: !!o.present, yFraction: Math.max(0, Math.min(1, +o.yFraction || 0.9)), confidence: Math.max(0, Math.min(1, +o.confidence || 0)) };
-  } catch (e) { return null; }
+    return { present: !!o.present, yFraction: Math.max(0, Math.min(1, +o.yFraction || 0.9)), confidence: Math.max(0, Math.min(1, +o.confidence || 0)), status: 'ok', note: txt.slice(0, 100) };
+  } catch (e) { return { present: false, status: 'error', note: String((e && e.message) || e).slice(0, 160) }; }
 }
 
 module.exports = { render, renderKit, analyze, visionDetectOverlay, PRESETS, QUALITY, HARD_CAP_SEC, lastChangeIndex, settleDurationSec };
