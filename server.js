@@ -17,7 +17,7 @@ const os = require('os');
 const { render, renderKit, analyze } = require('./render');
 const { JobQueue } = require('./queue');
 const { tierOpts, PRICING } = require('./tiers');
-const { createCheckout, verifyPaid, verifyWebhook, LIVE } = require('./payments');
+const { createCheckout, verifyPaid, verifyWebhook, LIVE, EMBEDDED_OK, PUBLISHABLE_KEY } = require('./payments');
 
 const PORT = process.env.PORT || 8080;
 const PUBLIC = __dirname; // flat layout: index.html sits beside server.js
@@ -336,9 +336,16 @@ const server = http.createServer((req, res) => {
       let o; try { o = JSON.parse(body || '{}'); } catch { return sendJSON(res, 400, { error: 'Bad JSON' }); }
       if (!loadSource(o.jobId)) return sendJSON(res, 404, { error: 'Video expired — please re-render' });
       const returnTo = (o.returnTo && /^https?:\/\//.test(o.returnTo)) ? o.returnTo.replace(/\/$/, '') : baseUrl;
-      try { const c = await createCheckout({ jobId: o.jobId, baseUrl, returnTo }); bump('checkout'); sendJSON(res, 200, { url: c.url, live: LIVE }); }
+      try { const c = await createCheckout({ jobId: o.jobId, baseUrl, returnTo, embedded: !!o.embedded }); bump('checkout'); sendJSON(res, 200, { url: c.url, clientSecret: c.clientSecret, live: LIVE }); }
       catch (e) { sendJSON(res, 500, { error: e.message }); }
     });
+  }
+
+  // Public client config — the studio fetches this to decide whether it can show
+  // the in-page embedded checkout (needs the publishable key) or must fall back
+  // to the hosted redirect. Only the publishable key is exposed (safe in browser).
+  if (req.method === 'GET' && url.pathname === '/api/config') {
+    return sendJSON(res, 200, { live: LIVE, embedded: EMBEDDED_OK, publishableKey: EMBEDDED_OK ? PUBLISHABLE_KEY : '' });
   }
 
   // Stripe webhook — records the payment server-side even if the buyer's browser

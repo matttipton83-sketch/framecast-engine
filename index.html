@@ -207,6 +207,17 @@
   .rmstage.active .pd{background:var(--accent);box-shadow:0 0 10px var(--accent);animation:rmblink 1s ease-in-out infinite}
   .rmstage.done{color:var(--accent2);border-color:transparent;background:rgba(94,224,192,.1)}
   .rmstage.done .pd{background:var(--accent2)}
+  /* ---- embedded checkout modal (in-page popup) ---- */
+  #coModal{position:fixed;inset:0;z-index:95;display:none;align-items:flex-start;justify-content:center;padding:40px 18px;background:rgba(4,5,12,.82);backdrop-filter:blur(10px);overflow-y:auto}
+  #coModal.show{display:flex}
+  .cosheet{position:relative;width:100%;max-width:480px;background:#fff;border-radius:20px;padding:16px 16px 8px;box-shadow:0 50px 130px rgba(0,0,0,.7);animation:rmpop .38s cubic-bezier(.2,.9,.25,1) both}
+  .cohead{display:flex;align-items:center;gap:9px;padding:6px 6px 12px;color:#0b0e16}
+  .cohead .mk{width:26px;height:26px;flex:none}
+  .cohead b{font-size:15px;font-weight:800;letter-spacing:-.01em}
+  .cohead .tag{margin-left:auto;font-size:11.5px;font-weight:700;color:#5b6478;background:#f1f2f6;border-radius:999px;padding:4px 10px}
+  .coclose{position:absolute;top:-12px;right:-12px;width:34px;height:34px;border-radius:50%;border:1px solid var(--line2);background:rgba(20,22,36,.96);color:#fff;font-size:17px;line-height:1;cursor:pointer;display:grid;place-items:center;box-shadow:0 8px 22px rgba(0,0,0,.5)}
+  .coclose:hover{background:#2a2d44}
+  #coMount{min-height:280px}
   @keyframes rmblink{0%,100%{opacity:1}50%{opacity:.35}}
   .rmbar{height:12px;background:rgba(255,255,255,.07);border:1px solid var(--line);border-radius:999px;overflow:hidden;position:relative}
   .rmbar i{display:block;height:100%;width:0;border-radius:999px;background:linear-gradient(90deg,var(--accent),var(--accent2),var(--accent));background-size:200% 100%;animation:encshim 1.2s linear infinite;transition:width .5s cubic-bezier(.3,.8,.3,1)}
@@ -223,6 +234,7 @@
   @media(max-width:840px){.grid{grid-template-columns:1fr}}
   @media(prefers-reduced-motion:reduce){*{animation-duration:.001s!important;animation-iteration-count:1!important}}
 </style>
+<script src="https://js.stripe.com/v3/"></script>
 </head>
 <body>
   <div class="aurora"><b class="a1"></b><b class="a2"></b><b class="a3"></b></div>
@@ -319,6 +331,14 @@
       <div class="rmbar" id="rmBar"><i id="rmFill"></i></div>
       <div class="rmmeta"><span class="rmpct" id="rmPct">0%</span><span class="rmtimer" id="rmTimer">0:00</span></div>
       <div class="rmfoot">Frame-perfect capture · no watermark · keep this tab open</div>
+    </div>
+  </div>
+
+  <div id="coModal">
+    <div class="cosheet">
+      <button class="coclose" id="coClose" aria-label="Close checkout">×</button>
+      <div class="cohead"><span class="mk" data-logo="full"></span><b>Framecast</b><span class="tag">Secure checkout · Stripe</span></div>
+      <div id="coMount"></div>
     </div>
   </div>
 
@@ -545,16 +565,49 @@ async function watchJob(jobId){
     RM.done(()=>{ $('#status').textContent=showResult(st); $('#ractions').classList.add('show'); });
   }catch(err){RM.fail(err.message);$('#status').textContent='⚠ '+err.message+' — this link may have expired.';}
 }
+let coCfg=null, coInstance=null;
+async function getCoConfig(){
+  if(coCfg) return coCfg;
+  try{ coCfg=await fetch(API+'/api/config').then(r=>r.json()); }
+  catch(e){ coCfg={live:true,embedded:false,publishableKey:''}; }   // fail safe → hosted redirect
+  return coCfg;
+}
+function closeCheckout(){
+  try{ if(coInstance){ coInstance.destroy(); coInstance=null; } }catch(e){}
+  $('#coModal').classList.remove('show'); document.body.style.overflow=''; $('#unlock').disabled=false;
+}
+async function openCheckout(clientSecret, pk){
+  const stripe=Stripe(pk);
+  coInstance=await stripe.initEmbeddedCheckout({ clientSecret });
+  $('#coMount').innerHTML='';
+  $('#coModal').classList.add('show'); document.body.style.overflow='hidden';
+  coInstance.mount('#coMount');
+  $('#status').textContent='Complete your payment to unlock every format.';
+}
+async function hostedFallback(){   // a Stripe.js hiccup should never block a sale
+  const d=await jfetch(API+'/api/checkout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jobId:lastJobId,returnTo:location.origin,embedded:false})});
+  if(d.url){ savePending(lastJobId); window.location.href=abs(d.url); return true; }
+  return false;
+}
 async function doUnlock(){
   if(!lastJobId)return;
   $('#unlock').disabled=true;$('#status').textContent='Opening checkout…';
   try{
-    const d=await jfetch(API+'/api/checkout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jobId:lastJobId,returnTo:location.origin})});
-    if(d.live){ savePending(lastJobId); window.location.href=abs(d.url); }
-    else { await renderClean(lastJobId,'dev'); }
-  }catch(err){$('#status').textContent='⚠ '+err.message;$('#unlock').disabled=false;}
+    const cfg=await getCoConfig();
+    const wantEmbedded=!!(cfg.embedded && cfg.publishableKey && window.Stripe);
+    const d=await jfetch(API+'/api/checkout',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({jobId:lastJobId,returnTo:location.origin,embedded:wantEmbedded})});
+    if(d.clientSecret && wantEmbedded){ savePending(lastJobId); await openCheckout(d.clientSecret,cfg.publishableKey); }
+    else if(d.live && d.url){ savePending(lastJobId); window.location.href=abs(d.url); }   // hosted
+    else { await renderClean(lastJobId,'dev'); }                                            // dev
+  }catch(err){
+    closeCheckout();
+    try{ if(await hostedFallback()) return; }catch(e){}
+    $('#status').textContent='⚠ '+err.message; $('#unlock').disabled=false;
+  }
 }
 $('#unlock').onclick=()=>{ if(!lastJobId)return; doUnlock(); };
+$('#coClose').onclick=()=>{ closeCheckout(); $('#status').textContent='Checkout closed — your preview is still here. Unlock anytime.'; };
+$('#coModal').onclick=(e)=>{ if(e.target===$('#coModal')) $('#coClose').onclick(); };
 $('#copylink').onclick=async()=>{
   try{ await navigator.clipboard.writeText(location.href); const b=$('#copylink'); b.textContent='Copied!'; setTimeout(()=>b.textContent='Copy link',1500); }catch(e){}
 };
