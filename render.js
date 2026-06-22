@@ -155,11 +155,57 @@ function settleDurationSec(sizes, stepMs, { capSec = 75, minSec = 3 } = {}) {
 // though the rendered clip is still capped at capSec. This only runs on the hard
 // "no timeline" path, so the extra tiny screenshots are a fair price for not
 // rendering a 60s looping ad out to 75s.
-async function analyzeProbe(page, { capSec = 75, loopWindowSec = 150, stepMs = 500, minSec = 3 } = {}) {
+// Pick the animation's TRUE aspect ratio. The naive "largest element" heuristic is
+// fooled by full-bleed letterbox/pillarbox wrappers — a 9:16 film centered inside a
+// black `inset:0` div measures as 16:9. So: if a viewport-filling element with a
+// SOLID (opaque) background exists (= letterbox bars) AND there's a large inset
+// element spanning exactly one axis (the real stage), use the stage's aspect.
+// Otherwise fall back to the largest element (genuine full-bleed) — prior behavior.
+function stageAspectInPage() {
+  const vw = window.innerWidth, vh = window.innerHeight, vArea = vw * vh;
+  const near = (a, b) => Math.abs(a - b) <= b * 0.03;
+  const els = document.body ? document.body.querySelectorAll('*') : [];
+  let fill = { area: 0, w: 16, h: 9 }, stage = { area: 0, w: 0, h: 0 }, hasLetterbox = false;
+  for (const el of els) {
+    const r = el.getBoundingClientRect();
+    if (r.width < 40 || r.height < 40) continue;
+    const area = r.width * r.height;
+    const fillsW = near(r.width, vw), fillsH = near(r.height, vh);
+    if (fillsW && fillsH) {
+      if (area > fill.area) fill = { area, w: r.width, h: r.height };
+      try {
+        const bg = getComputedStyle(el).backgroundColor;
+        const m = bg && bg.match(/^rgba?\(([^)]+)\)/);
+        if (m) { const p = m[1].split(',').map((s) => parseFloat(s)); const a = p.length >= 4 ? p[3] : 1; if (a > 0.1) hasLetterbox = true; }
+      } catch (e) {}
+    } else if ((fillsW || fillsH) && r.width <= vw * 1.02 && r.height <= vh * 1.02 && area > stage.area && area > vArea * 0.2) {
+      stage = { area, w: r.width, h: r.height };
+    }
+  }
+  // Only trust the inset stage if its aspect is close to a standard target —
+  // real letterboxed exports target 16:9 / 1:1 / 9:16; an incidental inset block
+  // (e.g. a tall hero in a full-bleed 16:9 design) won't, so we keep the fill.
+  const stageAr = stage.area ? stage.w / stage.h : 0;
+  const snapsToStandard = [16 / 9, 1, 9 / 16].some((t) => Math.abs(stageAr - t) <= t * 0.06);
+  let pick;
+  if (hasLetterbox && stage.area > 0 && snapsToStandard) pick = stage;
+  else if (fill.area > 0) pick = fill;
+  else { const de = document.documentElement; pick = { w: de.scrollWidth || 16, h: de.scrollHeight || 9 }; }
+  return pick.w / pick.h;
+}
+
+async function analyzeProbe(page, { capSec = 75, loopWindowSec = 150, stepMs = 500, minSec = 3, aspect = 0 } = {}) {
   const empty = { settleSec: 0, loop: { detected: false }, blanks: { blankRanges: [], tornSteps: [] } };
   try {
     const prevW = page.viewportSize();
-    await page.setViewportSize({ width: 320, height: 180 }); // tiny = fast probe
+    // Size the tiny probe to the CONTENT aspect so a letterboxed clip fills the probe
+    // frame; otherwise the bars dominate the per-frame signature and the loop/settle
+    // detectors misfire (a 9:16 clip probed at 16:9 reads as a false short loop).
+    let ar = aspect || (prevW && prevW.height ? prevW.width / prevW.height : 16 / 9);
+    if (!isFinite(ar) || ar <= 0) ar = 16 / 9;
+    const pw = ar >= 1 ? Math.max(2, Math.round((180 * ar) / 2) * 2) : 180;
+    const ph = ar >= 1 ? 180 : Math.max(2, Math.round((180 / ar) / 2) * 2);
+    await page.setViewportSize({ width: pw, height: ph }); // tiny = fast probe, aspect-matched
     const steps = Math.floor((loopWindowSec * 1000) / stepMs);
     const signatures = [];
     // Scan the FULL window (no early break): a mid-clip pause must never be
@@ -262,19 +308,7 @@ async function render(opts) {
 
   // --- format auto-detection: read the animation's natural aspect ratio ---
   if (auto) {
-    const ar = await page.evaluate(() => {
-      // Prefer the largest visible block-ish element as the "stage".
-      let best = { area: 0, w: 16, h: 9 };
-      const els = document.body ? document.body.querySelectorAll('*') : [];
-      for (const el of els) {
-        const r = el.getBoundingClientRect();
-        const area = r.width * r.height;
-        if (r.width > 40 && r.height > 40 && area > best.area) best = { area, w: r.width, h: r.height };
-      }
-      const de = document.documentElement;
-      if (best.area === 0) { best = { w: de.scrollWidth || 16, h: de.scrollHeight || 9 }; }
-      return best.w / best.h;
-    });
+    const ar = await page.evaluate(stageAspectInPage);
     // map measured aspect ratio to the closest standard preset
     const candidates = [
       { id: 'youtube-1080', r: 16 / 9 },
@@ -353,7 +387,7 @@ async function render(opts) {
     }
     // No readable timeline (e.g. bundled GSAP)? Probe for motion + loop + blanks.
     if (opts.autoDetect && !durationSec) {
-      const probe = await analyzeProbe(page, { capSec: HARD_CAP_SEC });
+      const probe = await analyzeProbe(page, { capSec: HARD_CAP_SEC, aspect: width / height });
       analysis = { loop: probe.loop, blanks: probe.blanks };
       // A confident LOOP -> render exactly ONE clean cycle instead of running to
       // the 75s cap. This is the fix for looping ads over-detecting to 1:15.
@@ -578,18 +612,7 @@ async function analyze(opts) {
     await waitForReady(page); // mount gate — measure the real animation, not a placeholder
 
     // --- aspect ratio -> nearest standard preset (same logic as render's auto) ---
-    const aspectRatio = await page.evaluate(() => {
-      let best = { area: 0, w: 16, h: 9 };
-      const els = document.body ? document.body.querySelectorAll('*') : [];
-      for (const el of els) {
-        const r = el.getBoundingClientRect();
-        const area = r.width * r.height;
-        if (r.width > 40 && r.height > 40 && area > best.area) best = { area, w: r.width, h: r.height };
-      }
-      const de = document.documentElement;
-      if (best.area === 0) best = { w: de.scrollWidth || 16, h: de.scrollHeight || 9 };
-      return best.w / best.h;
-    });
+    const aspectRatio = await page.evaluate(stageAspectInPage);
     const cands = [{ id: 'youtube-1080', r: 16 / 9 }, { id: 'square-1080', r: 1 }, { id: 'vertical-1080', r: 9 / 16 }];
     const preset = cands.sort((a, b) => Math.abs(a.r - aspectRatio) - Math.abs(b.r - aspectRatio))[0].id;
     const P = PRESETS[preset];
@@ -610,7 +633,7 @@ async function analyze(opts) {
     if (info.declaredMs > 0) { durationSec = Math.min(HARD_CAP_SEC, info.declaredMs / 1000); durSource = 'declared'; }
     else if (info.max > 0) { durationSec = Math.min(HARD_CAP_SEC, Math.ceil(info.max / 1000 + 0.5)); durSource = (info.gsapMs > 0 && info.gsapMs >= info.cssMs) ? 'gsap' : 'css'; }
     if (!durationSec) {
-      const probe = await analyzeProbe(page, { capSec: HARD_CAP_SEC });
+      const probe = await analyzeProbe(page, { capSec: HARD_CAP_SEC, aspect: P.width / P.height });
       loop = probe.loop; blanks = probe.blanks;
       if (probe.loop && probe.loop.detected && probe.loop.confidence >= 0.6) { durationSec = Math.min(HARD_CAP_SEC, Math.max(1, probe.loop.periodSec)); durSource = 'loop'; }
       else if (probe.settleSec > 0) { durationSec = probe.settleSec; durSource = 'settle'; }
