@@ -162,6 +162,24 @@ function settleDurationSec(sizes, stepMs, { capSec = 75, minSec = 3 } = {}) {
 // element spanning exactly one axis (the real stage), use the stage's aspect.
 // Otherwise fall back to the largest element (genuine full-bleed) — prior behavior.
 function stageAspectInPage() {
+  // Highest-confidence signal: an explicit stage element (the convention in our
+  // own ads and most Claude artifacts). Its own box IS the authored canvas, so it
+  // isn't fooled by a GRADIENT or otherwise non-solid full-bleed backdrop the way
+  // the letterbox heuristic below can be (that path only recognizes solid-color
+  // bars, so a gradient backdrop makes it fall back to the viewport aspect and a
+  // 1:1 / 9:16 stage gets mis-read as 16:9). Trust it ONLY when its aspect snaps to
+  // a standard target, so a mislabeled or partial #stage can never hijack
+  // detection — otherwise fall through to the heuristic below unchanged.
+  try {
+    const ex = document.querySelector('#stage, [data-framecast-stage]');
+    if (ex) {
+      const er = ex.getBoundingClientRect();
+      if (er.width > 40 && er.height > 40) {
+        const ear = er.width / er.height;
+        if ([16 / 9, 1, 9 / 16].some((t) => Math.abs(ear - t) <= t * 0.06)) return ear;
+      }
+    }
+  } catch (e) {}
   const vw = window.innerWidth, vh = window.innerHeight, vArea = vw * vh;
   const near = (a, b) => Math.abs(a - b) <= b * 0.03;
   const els = document.body ? document.body.querySelectorAll('*') : [];
