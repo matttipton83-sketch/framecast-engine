@@ -477,8 +477,52 @@ async function render(opts) {
     const cw = Math.max(2, Math.round(width * (1 - cropBottom) / 2) * 2);
     const ch = Math.max(2, Math.round(height * (1 - cropBottom) / 2) * 2);
     grabClip = { x: Math.round((width - cw) / 2), y: 0, width: cw, height: ch };
-  } else if (opts.removeOverlay) {
-    try { await page.evaluate(overlayPageFn, { mode: 'hide' }); } catch (_) {}
+  } else {
+    if (opts.removeOverlay) {
+      try { await page.evaluate(overlayPageFn, { mode: 'hide' }); } catch (_) {}
+    }
+    // --- fixed-size stage fit ------------------------------------------------
+    // Most artifacts are responsive (100vw/100vh) and reflow to fill whatever
+    // viewport we give them, so the captured frame already matches the output.
+    // An artifact authored at a FIXED pixel size (e.g. body{width:1280px;
+    // height:720px}) does NOT reflow, so it never matches a different-sized
+    // output frame:
+    //   - output viewport LARGER than the stage  -> stage sits native-size in the
+    //     top-left, shrunk into a corner / off-center (the full-export bug).
+    //   - output viewport SMALLER than the stage -> only the stage's top-left
+    //     corner is visible, looking zoomed-in (the watermarked-teaser bug).
+    // Both are the same cause: we never fit the authored stage to the frame.
+    // Fix: when a fixed stage whose aspect matches the target is found, capture at
+    // the stage's NATIVE size and let the ffmpeg scale=width:height below fit it
+    // to the output. Guarded so responsive pages (box == viewport) are untouched,
+    // and aspect-matched so we only ever scale, never distort or crop content.
+    try {
+      const box = await page.evaluate(() => {
+        const b = document.body;
+        if (!b) return null;
+        const stageEl = document.querySelector('#stage, [data-framecast-stage]');
+        if (stageEl) {
+          const r = stageEl.getBoundingClientRect();
+          return { w: r.width, h: r.height, src: 'stage' };
+        }
+        // offsetWidth/Height report a fixed-size body at its layout size, even
+        // when the viewport is larger or smaller (unlike window.innerWidth).
+        return { w: b.offsetWidth, h: b.offsetHeight, src: 'body' };
+      });
+      if (box && box.w > 40 && box.h > 40) {
+        const arBox = box.w / box.h, arOut = width / height;
+        const aspectMatches = Math.abs(arBox - arOut) <= arOut * 0.06;
+        const differs = Math.abs(box.w - width) > width * 0.015 || Math.abs(box.h - height) > height * 0.015;
+        if (aspectMatches && differs) {
+          const capW = Math.max(2, Math.round(box.w / 2) * 2);
+          const capH = Math.max(2, Math.round(box.h / 2) * 2);
+          await page.setViewportSize({ width: capW, height: capH });
+          await page.waitForTimeout(80);
+          grabClip = { x: 0, y: 0, width: capW, height: capH };
+          console.log(`[framecast] stage-fit: capturing native ${capW}x${capH} (src=${box.src}) -> scaled to ${width}x${height}`);
+        }
+      }
+    } catch (_) {}
   }
 
   // Capture via the raw DevTools protocol — skips Playwright's per-screenshot
