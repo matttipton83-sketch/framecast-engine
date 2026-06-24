@@ -82,10 +82,44 @@ function watermarkFilter() {
   return `${center},${badge}`;
 }
 
-function buildFfmpegArgs({ container, fps, width, height, quality, transparent, watermark, outPath }) {
+function buildFfmpegArgs({ container, fps, width, height, quality, transparent, watermark, outPath, capW, capH }) {
   const q = QUALITY[quality] || QUALITY.high;
   const common = ['-y', '-f', 'image2pipe', '-framerate', String(fps), '-i', 'pipe:0'];
   const wm = watermark ? watermarkFilter() : null;
+
+  // When the captured frame's aspect differs from the output (e.g. a 16:9 animation
+  // exported to a 1:1 or 9:16 format), DON'T stretch or corner-crop: fit the whole
+  // frame centered with a blurred-zoom fill behind it. Same look as the paid
+  // multi-format reframe, so the free teaser and the paid export match. Skipped for
+  // transparent output (alpha must be preserved, no blurred backdrop).
+  const aspectDiffers = !transparent && capW && capH
+    && Math.abs((capW / capH) - (width / height)) >= 0.01;
+  if (aspectDiffers) {
+    const wmS = wm ? `,${wm}` : '';
+    const bw = Math.max(2, Math.round(width / 4) * 2), bh = Math.max(2, Math.round(height / 4) * 2);
+    const fit = `[0:v]split[bg][fg];`
+      + `[bg]scale=${bw}:${bh}:force_original_aspect_ratio=increase,crop=${bw}:${bh},gblur=sigma=11,scale=${width}:${height}[bgb];`
+      + `[fg]scale=${width}:${height}:force_original_aspect_ratio=decrease:flags=lanczos[fgs];`
+      + `[bgb][fgs]overlay=(W-w)/2:(H-h)/2,setsar=1${wmS}`;
+    if (container === 'mp4') {
+      return [...common, '-filter_complex', `${fit}[v]`, '-map', '[v]',
+        '-c:v', 'libx264', '-preset', q.preset, '-crf', String(q.crf),
+        '-pix_fmt', 'yuv420p', '-movflags', '+faststart', outPath];
+    }
+    if (container === 'webm') {
+      return [...common, '-filter_complex', `${fit}[v]`, '-map', '[v]',
+        '-c:v', 'libvpx-vp9', '-pix_fmt', 'yuv420p', '-b:v', '0', '-crf', String(q.crf + 8),
+        '-row-mt', '1', outPath];
+    }
+    if (container === 'gif') {
+      return [...common, '-filter_complex',
+        `${fit},split[s0][s1];[s0]palettegen=stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=3[v]`,
+        '-map', '[v]', outPath];
+    }
+    throw new Error('Unknown container: ' + container);
+  }
+
+  // Aspect matches (or transparent): straight scale to the output size.
   const base = `scale=${width}:${height}:flags=lanczos` + (wm ? `,${wm}` : '');
 
   if (container === 'mp4') {
@@ -453,7 +487,50 @@ async function render(opts) {
   const totalFrames = Math.round(durationSec * fps);
   const frameMs = 1000 / fps;
 
-  const ffmpegArgs = buildFfmpegArgs({ container: ext, fps, width, height, quality, transparent, watermark, outPath });
+  // play-bar crop (rare; see note below). Computed up here so stage-fit can skip it.
+  const cropBottom = (opts.cropBottom && opts.cropBottom > 0.02 && opts.cropBottom < 0.5) ? opts.cropBottom : 0;
+
+  // --- fixed-size stage fit (decide the capture size) ----------------------
+  // Default: capture at the OUTPUT size. Responsive artifacts (100vw/100vh)
+  // reflow to fill it, so the captured frame already matches the output.
+  // An artifact authored at a FIXED, standard-aspect stage (e.g.
+  // body{width:1280px;height:720px}) does NOT reflow, so at any other-sized
+  // output frame it either shrinks into a corner or shows only its corner.
+  // Fix: capture at the stage's NATIVE size so the WHOLE scene is captured;
+  // buildFfmpegArgs then maps it to the output — a clean scale when the aspects
+  // match, and a fit-and-center with a blurred fill when they differ (a 16:9
+  // animation sent to a 1:1 / 9:16 format), never a stretch or a corner crop.
+  // Guarded to a fixed stage whose aspect snaps to a standard target AND that
+  // differs in size from the viewport, so responsive pages are never touched.
+  let capW = width, capH = height;
+  if (!cropBottom) {
+    try {
+      const box = await page.evaluate(() => {
+        const b = document.body;
+        if (!b) return null;
+        const stageEl = document.querySelector('#stage, [data-framecast-stage]');
+        if (stageEl) { const r = stageEl.getBoundingClientRect(); return { w: r.width, h: r.height }; }
+        // offsetWidth/Height report a fixed-size body at its layout size, even
+        // when the viewport is larger or smaller (unlike window.innerWidth).
+        return { w: b.offsetWidth, h: b.offsetHeight };
+      });
+      if (box && box.w > 40 && box.h > 40) {
+        const ar = box.w / box.h;
+        const snapsToStandard = [16 / 9, 1, 9 / 16].some((t) => Math.abs(ar - t) <= t * 0.06);
+        const differs = Math.abs(box.w - width) > width * 0.015 || Math.abs(box.h - height) > height * 0.015;
+        if (snapsToStandard && differs) {
+          capW = Math.max(2, Math.round(box.w / 2) * 2);
+          capH = Math.max(2, Math.round(box.h / 2) * 2);
+          await page.setViewportSize({ width: capW, height: capH });
+          await page.waitForTimeout(80);
+          const mode = Math.abs((capW / capH) - (width / height)) < 0.01 ? 'scale' : 'fit';
+          console.log(`[framecast] stage-fit: capturing native ${capW}x${capH} -> ${mode} to ${width}x${height}`);
+        }
+      }
+    } catch (_) {}
+  }
+
+  const ffmpegArgs = buildFfmpegArgs({ container: ext, fps, width, height, quality, transparent, watermark, outPath, capW, capH });
   const ffmpegBin = opts.ffmpegPath || process.env.FRAMECAST_FFMPEG || 'ffmpeg';
   const ffmpeg = spawn(ffmpegBin, ffmpegArgs, { stdio: ['pipe', 'inherit', 'inherit'] });
   let ffmpegErr = null;
@@ -471,58 +548,13 @@ async function render(opts) {
   //  • SVG/canvas/dynamic bars (vision tie-break) -> can't be hidden, so crop the
   //    bottom strip via the capture clip; the existing scale upsizes it back to
   //    full size (uniform zoom, no distortion).
-  const cropBottom = (opts.cropBottom && opts.cropBottom > 0.02 && opts.cropBottom < 0.5) ? opts.cropBottom : 0;
-  let grabClip = { x: 0, y: 0, width, height };
+  let grabClip = { x: 0, y: 0, width: capW, height: capH };
   if (cropBottom) {
-    const cw = Math.max(2, Math.round(width * (1 - cropBottom) / 2) * 2);
-    const ch = Math.max(2, Math.round(height * (1 - cropBottom) / 2) * 2);
-    grabClip = { x: Math.round((width - cw) / 2), y: 0, width: cw, height: ch };
-  } else {
-    if (opts.removeOverlay) {
-      try { await page.evaluate(overlayPageFn, { mode: 'hide' }); } catch (_) {}
-    }
-    // --- fixed-size stage fit ------------------------------------------------
-    // Most artifacts are responsive (100vw/100vh) and reflow to fill whatever
-    // viewport we give them, so the captured frame already matches the output.
-    // An artifact authored at a FIXED pixel size (e.g. body{width:1280px;
-    // height:720px}) does NOT reflow, so it never matches a different-sized
-    // output frame:
-    //   - output viewport LARGER than the stage  -> stage sits native-size in the
-    //     top-left, shrunk into a corner / off-center (the full-export bug).
-    //   - output viewport SMALLER than the stage -> only the stage's top-left
-    //     corner is visible, looking zoomed-in (the watermarked-teaser bug).
-    // Both are the same cause: we never fit the authored stage to the frame.
-    // Fix: when a fixed stage whose aspect matches the target is found, capture at
-    // the stage's NATIVE size and let the ffmpeg scale=width:height below fit it
-    // to the output. Guarded so responsive pages (box == viewport) are untouched,
-    // and aspect-matched so we only ever scale, never distort or crop content.
-    try {
-      const box = await page.evaluate(() => {
-        const b = document.body;
-        if (!b) return null;
-        const stageEl = document.querySelector('#stage, [data-framecast-stage]');
-        if (stageEl) {
-          const r = stageEl.getBoundingClientRect();
-          return { w: r.width, h: r.height, src: 'stage' };
-        }
-        // offsetWidth/Height report a fixed-size body at its layout size, even
-        // when the viewport is larger or smaller (unlike window.innerWidth).
-        return { w: b.offsetWidth, h: b.offsetHeight, src: 'body' };
-      });
-      if (box && box.w > 40 && box.h > 40) {
-        const arBox = box.w / box.h, arOut = width / height;
-        const aspectMatches = Math.abs(arBox - arOut) <= arOut * 0.06;
-        const differs = Math.abs(box.w - width) > width * 0.015 || Math.abs(box.h - height) > height * 0.015;
-        if (aspectMatches && differs) {
-          const capW = Math.max(2, Math.round(box.w / 2) * 2);
-          const capH = Math.max(2, Math.round(box.h / 2) * 2);
-          await page.setViewportSize({ width: capW, height: capH });
-          await page.waitForTimeout(80);
-          grabClip = { x: 0, y: 0, width: capW, height: capH };
-          console.log(`[framecast] stage-fit: capturing native ${capW}x${capH} (src=${box.src}) -> scaled to ${width}x${height}`);
-        }
-      }
-    } catch (_) {}
+    const cw = Math.max(2, Math.round(capW * (1 - cropBottom) / 2) * 2);
+    const ch = Math.max(2, Math.round(capH * (1 - cropBottom) / 2) * 2);
+    grabClip = { x: Math.round((capW - cw) / 2), y: 0, width: cw, height: ch };
+  } else if (opts.removeOverlay) {
+    try { await page.evaluate(overlayPageFn, { mode: 'hide' }); } catch (_) {}
   }
 
   // Capture via the raw DevTools protocol — skips Playwright's per-screenshot
