@@ -99,7 +99,8 @@
   .filechip{flex:1;background:rgba(124,140,255,.14);border:1px solid var(--line2);border-radius:11px;padding:11px 14px;font-weight:600;font-size:13.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .link{color:var(--accent);cursor:pointer;font-size:13px;font-weight:600;flex:none}
 
-  iframe#preview{width:100%;height:340px;border:1px solid var(--line);border-radius:13px;background:#000;display:block}
+  #previewBox{position:relative;width:100%;height:340px;border:1px solid var(--line);border-radius:13px;background:#000;overflow:hidden}
+  iframe#preview{width:100%;height:100%;border:0;display:block}
 
   .formats{display:grid;grid-template-columns:1fr 1fr;gap:9px}
   .fmt{border:1px solid var(--line);border-radius:12px;padding:11px 13px;cursor:pointer;background:var(--panel);transition:.16s}
@@ -271,7 +272,7 @@
             <input type="file" id="file" accept=".html,.htm" hidden>
           </div>
           <div class="label" style="margin-top:20px"><span class="n">◢</span> LIVE PREVIEW</div>
-          <iframe id="preview"></iframe>
+          <div id="previewBox"><iframe id="preview"></iframe></div>
         </div>
 
         <div class="col">
@@ -446,7 +447,39 @@ drop.addEventListener('drop',e=>{const f=e.dataTransfer.files[0];if(f)loadFile(f
 fileInput.onchange=e=>{const f=e.target.files[0];if(f)loadFile(f);};
 $('#clear').onclick=e=>{e.stopPropagation();reset();};
 $('#again').onclick=reset;
-function hydrate(html,name){state.html=html;state.fname=(name||'animation').replace(/\.[^.]+$/,'');$('#fname').textContent=(state.fname)+'.html';$('#empty').classList.add('hide');$('#loaded').classList.add('show');$('#preview').srcdoc=html;$('#export').disabled=false;$('#exhint').textContent='Analyzing your animation…';analyzeFile();}
+/* Scale the live preview to fit. Most artifacts are responsive (100vw/100vh) and
+   already fill the iframe, so they're left alone. But an artifact authored at a
+   FIXED, standard-aspect size (e.g. body{width:1280px;height:720px}) does NOT
+   reflow, so the iframe would show only its top-left corner and clip centered
+   content. Detect that and scale the iframe to fit the box, centered. */
+function fitPreview(){
+  var ifr=$('#preview'), box=$('#previewBox');
+  if(!ifr||!box) return;
+  // reset to default (responsive fill)
+  ifr.style.position='static';ifr.style.left='';ifr.style.top='';ifr.style.width='100%';ifr.style.height='100%';ifr.style.transform='none';
+  try{
+    var d=ifr.contentDocument, b=d&&d.body;
+    if(!b) return;
+    var cw=b.offsetWidth, ch=b.offsetHeight;
+    if(cw>40&&ch>40){
+      var ar=cw/ch;
+      var snaps=[16/9,1,9/16].some(function(t){return Math.abs(ar-t)<=t*0.06;});
+      var bw=box.clientWidth, bh=box.clientHeight;
+      var differs=Math.abs(cw-bw)>bw*0.02||Math.abs(ch-bh)>bh*0.02;
+      if(snaps&&differs){
+        var s=Math.min(bw/cw,bh/ch);
+        ifr.style.position='absolute';
+        ifr.style.width=cw+'px';ifr.style.height=ch+'px';
+        ifr.style.left=Math.round((bw-cw*s)/2)+'px';
+        ifr.style.top=Math.round((bh-ch*s)/2)+'px';
+        ifr.style.transformOrigin='top left';
+        ifr.style.transform='scale('+s+')';
+      }
+    }
+  }catch(e){}
+}
+window.addEventListener('resize',fitPreview);
+function hydrate(html,name){state.html=html;state.fname=(name||'animation').replace(/\.[^.]+$/,'');$('#fname').textContent=(state.fname)+'.html';$('#empty').classList.add('hide');$('#loaded').classList.add('show');var _pv=$('#preview');_pv.onload=fitPreview;_pv.srcdoc=html;$('#export').disabled=false;$('#exhint').textContent='Analyzing your animation…';analyzeFile();}
 function loadFile(f){const r=new FileReader();r.onload=()=>hydrate(r.result,f.name);r.readAsText(f);}
 function reset(){try{history.replaceState({},'',location.pathname);}catch(e){}state.html=null;state.removeOverlay=false;state.cropBottom=0;analyzeSeq++;var _dc=$('#detect');if(_dc){_dc.style.display='none';_dc.innerHTML='';}$('#empty').classList.remove('hide');$('#loaded').classList.remove('show');$('#preview').srcdoc='';$('#export').disabled=true;$('#exhint').textContent='Drop a file to begin';$('#bar').classList.remove('show');$('#result').classList.remove('show');$('#kit').classList.remove('show');$('#ractions').classList.remove('show');$('#status').textContent='';}
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
