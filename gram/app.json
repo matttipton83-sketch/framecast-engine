@@ -1,0 +1,22 @@
+{
+  "expo": {
+    "name": "GRAM",
+    "slug": "gram-puzzle",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0f1419",
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#0f1419"
+      }
+    },
+    "web": {
+      "bundler": "metro"
+    }
+  }
+}
