@@ -108,6 +108,10 @@
   .fmt.sel{border-color:transparent;background:rgba(124,140,255,.13);box-shadow:0 0 0 1.5px var(--accent),0 8px 22px rgba(124,140,255,.18)}
   .fmt .name{font-weight:600;font-size:13.5px;margin-bottom:2px}
   .fmt .dim{color:var(--muted2);font-size:11.5px}
+  .fmt.soon{cursor:default;opacity:.55}
+  .fmt.soon:hover{border-color:var(--line);transform:none}
+  .fmt.soon .name::after{content:'soon';margin-left:6px;font-size:9.5px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--accent);border:1px solid var(--accent);border-radius:5px;padding:1px 4px;vertical-align:1.5px;opacity:.8}
+  .fmt.soon.noted{opacity:.8}
 
   .ctl-row{display:flex;align-items:center;justify-content:space-between;gap:14px;margin:20px 0 8px}
   .ctl-row label{font-weight:600;font-size:14px}
@@ -426,7 +430,7 @@ const RM=(function(){
 const FORMATS=[
   {id:'auto',name:'Auto-detect',dim:'match the animation'},
   {id:'youtube-1080',name:'YouTube 1080p',dim:'1920×1080 · 16:9'},
-  {id:'youtube-4k',name:'YouTube 4K',dim:'3840×2160 · 16:9'},
+  {id:'youtube-4k',name:'YouTube 4K',dim:'3840×2160 · 16:9',soon:true},
   {id:'vertical-1080',name:'Vertical',dim:'1080×1920 · 9:16'},
   {id:'square-1080',name:'Square',dim:'1080×1080 · 1:1'},
   {id:'gif',name:'GIF',dim:'animated loop'},
@@ -436,7 +440,17 @@ let state={preset:'auto',quality:'high',dur:0,html:null,fname:null,removeOverlay
 const API=localStorage.getItem('fc_api')||'';
 const abs=u=>(!u?u:(/^https?:\/\//.test(u)?u:API+u));
 const fw=$('#formats');
-FORMATS.forEach((f,i)=>{const el=document.createElement('div');el.className='fmt'+(i===0?' sel':'');el.innerHTML=`<div class="name">${f.name}</div><div class="dim">${f.dim}</div>`;el.onclick=()=>{state.preset=f.id;document.querySelectorAll('.fmt').forEach(x=>x.classList.remove('sel'));el.classList.add('sel');};fw.appendChild(el);});
+FORMATS.forEach((f,i)=>{const el=document.createElement('div');el.className='fmt'+(i===0?' sel':'')+(f.soon?' soon':'');el.innerHTML=`<div class="name">${f.name}</div><div class="dim">${f.dim}</div>`;el.onclick=()=>{if(f.soon){noteInterest(f.id,el);return;}state.preset=f.id;document.querySelectorAll('.fmt').forEach(x=>x.classList.remove('sel'));el.classList.add('sel');};fw.appendChild(el);});
+// A "soon" format isn't selectable — clicking it just records that someone
+// wanted it. That count is the demand signal for whether it's worth building,
+// instead of guessing. One ping per visit, and it never blocks the UI.
+const interestSent={};
+function noteInterest(id,el){
+  const dim=el.querySelector('.dim'); if(!dim||interestSent[id])return; interestSent[id]=true;
+  const was=dim.textContent; dim.textContent='Noted \u2014 we\u2019ll let you know'; el.classList.add('noted');
+  try{ fetch(API+'/api/interest',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({want:id})}).catch(()=>{}); }catch(e){}
+  setTimeout(()=>{ dim.textContent=was; el.classList.remove('noted'); },3200);
+}
 $('#quality').querySelectorAll('button').forEach(b=>b.onclick=()=>{state.quality=b.dataset.q;$('#quality').querySelectorAll('button').forEach(x=>x.classList.remove('sel'));b.classList.add('sel');});
 $('#dur').oninput=e=>{state.dur=+e.target.value;$('#durval').textContent=state.dur===0?'Auto':state.dur+'s';};
 const drop=$('#drop'),fileInput=$('#file');
@@ -497,7 +511,7 @@ function clearPending(jobId){ try{ if(jobId)localStorage.removeItem('fc_pending_
 let analyzeSeq=0;
 function applyDetected(d){
   const idx=FORMATS.findIndex(f=>f.id===d.preset);
-  if(idx>=0){state.preset=d.preset;const fmts=document.querySelectorAll('.fmt');fmts.forEach(x=>x.classList.remove('sel'));if(fmts[idx])fmts[idx].classList.add('sel');}
+  if(idx>=0&&!FORMATS[idx].soon){state.preset=d.preset;const fmts=document.querySelectorAll('.fmt');fmts.forEach(x=>x.classList.remove('sel'));if(fmts[idx])fmts[idx].classList.add('sel');}
   if(d.durationSec>0){state.dur=Math.min(75,Math.round(d.durationSec));$('#dur').value=state.dur;$('#durval').textContent=state.dur+'s';}
   const looping=d.loop&&d.loop.detected;
   const why=({declared:'length set in your file',css:'from your animation timeline',gsap:'from your animation timeline',loop:'detected a loop — one clean cycle',settle:'measured when motion stops',default:'best guess'})[d.durSource]||'auto-detected';

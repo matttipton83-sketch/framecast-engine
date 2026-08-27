@@ -25,6 +25,10 @@ const WORK = process.env.FRAMECAST_WORK || path.join(os.tmpdir(), 'framecast-clo
 const CONCURRENCY = Number(process.env.FRAMECAST_CONCURRENCY || 1);
 const MAX_HTML_BYTES = Number(process.env.FRAMECAST_MAX_HTML || 8 * 1024 * 1024);
 const SOURCE_TTL = 1000 * 60 * 60 * 6; // keep source 6h so a buyer can unlock later
+// Formats the UI shows as "coming soon". Clicking one records demand instead of
+// starting a render. Whitelisted so /api/interest can't be used to write arbitrary
+// keys into the funnel counters.
+const INTEREST_FORMATS = new Set(['youtube-4k']);
 fs.mkdirSync(WORK, { recursive: true });
 
 // Durable state dir — a Render persistent disk in prod (FRAMECAST_DATA=/data),
@@ -40,6 +44,13 @@ try { fs.mkdirSync(SRC_DIR, { recursive: true }); fs.mkdirSync(PAID_DIR, { recur
 // obvious whether we're persisting to disk or only to memory.
 let DATA_OK = false;
 try { const t = path.join(DATA, '.wtest'); fs.writeFileSync(t, '1'); fs.unlinkSync(t); DATA_OK = true; } catch (_) {}
+// Writable is NOT the same as durable. With FRAMECAST_DATA unset we fall back to
+// the temp dir, which is wiped on every restart and redeploy — so /healthz used to
+// report "disk" while paid orders were silently evaporating (Aug 27 2026). Only
+// call it durable when it's an explicit path outside the temp dir.
+const DATA_DURABLE = DATA_OK
+  && !!process.env.FRAMECAST_DATA
+  && !path.resolve(DATA).startsWith(path.resolve(os.tmpdir()) + path.sep);
 
 // --- funnel analytics (self-contained, persisted to the durable disk) --------
 // Counts the only numbers that matter for a one-off product: how many people
@@ -299,6 +310,20 @@ const server = http.createServer((req, res) => {
   // 0) Detect-and-confirm: analyze the dropped file (format + duration + loop)
   //    WITHOUT rendering, so the studio can show "here's what we found" and let
   //    the user confirm/adjust before paying. Poll /api/jobs/:id for the result.
+  // Demand signal for a format we don't ship yet. 4K needs more RAM than this
+  // instance has (see HARD_MAX_PIXELS in render.js), so rather than sell it or
+  // silently drop it, count how many people ask. Upgrade when the number earns it.
+  if (req.method === 'POST' && url.pathname === '/api/interest') {
+    if (rateLimited(req)) return sendJSON(res, 429, { error: 'Too many requests' });
+    return readBody(req, (body) => {
+      if (body === null) return sendJSON(res, 413, { error: 'Too large' });
+      let o; try { o = JSON.parse(body); } catch { return sendJSON(res, 400, { error: 'Bad JSON' }); }
+      if (!o || !INTEREST_FORMATS.has(o.want)) return sendJSON(res, 400, { error: 'Unknown format' });
+      bump('want:' + o.want);
+      sendJSON(res, 200, { ok: true });
+    });
+  }
+
   if (req.method === 'POST' && url.pathname === '/api/analyze') {
     if (rateLimited(req)) return sendJSON(res, 429, { error: 'Too many requests — please slow down and try again shortly.' });
     return readBody(req, (body) => {
@@ -413,7 +438,7 @@ const server = http.createServer((req, res) => {
   }
 
   if (req.method === 'GET' && url.pathname.startsWith('/files/')) return serveRanged(req, res, path.join(WORK, path.basename(url.pathname)));
-  if (url.pathname === '/healthz') return sendJSON(res, 200, { ok: true, active: queue.active, payments: LIVE ? 'stripe' : 'dev', persist: DATA_OK ? 'disk' : 'memory' });
+  if (url.pathname === '/healthz') return sendJSON(res, 200, { ok: true, active: queue.active, payments: LIVE ? 'stripe' : 'dev', persist: DATA_DURABLE ? 'disk' : (DATA_OK ? 'ephemeral' : 'memory'), dataDir: DATA });
   // Private funnel dashboard. Hidden unless FRAMECAST_STATS_KEY is set and matches.
   if (req.method === 'GET' && url.pathname === '/api/stats') {
     if (!STATS_KEY || url.searchParams.get('key') !== STATS_KEY) return sendJSON(res, 404, { error: 'Not found' });
@@ -435,5 +460,5 @@ const server = http.createServer((req, res) => {
   return serveFile(res, path.join(PUBLIC, 'index.html'));
 });
 
-server.listen(PORT, () => console.log(`Framecast cloud on :${PORT} · payments: ${LIVE ? 'Stripe' : 'DEV mode'} · per-video ${PRICING.perVideoLabel} · persist: ${DATA_OK ? 'disk(' + DATA + ')' : 'MEMORY ONLY — set FRAMECAST_DATA to a writable disk'}`));
+server.listen(PORT, () => console.log(`Framecast cloud on :${PORT} · payments: ${LIVE ? 'Stripe' : 'DEV mode'} · per-video ${PRICING.perVideoLabel} · persist: ${DATA_DURABLE ? 'disk(' + DATA + ')' : (DATA_OK ? 'EPHEMERAL(' + DATA + ') — orders will NOT survive a restart; mount a disk and set FRAMECAST_DATA' : 'MEMORY ONLY — set FRAMECAST_DATA to a writable disk')}`));
 module.exports = { server };

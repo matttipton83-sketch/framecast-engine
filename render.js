@@ -20,6 +20,37 @@ const virtualTimeScript = require('./virtual-time');
 const HARD_CAP_SEC = 75; // product ceiling: 1:15
 const MAX_JOB_MS = Number(process.env.FRAMECAST_MAX_JOB_MS || 240000); // hard kill: a single job can't run longer than this
 
+// x264 reads the HOST's core count inside a container, so `threads=0` (auto) spun
+// up 24 workers on a 1-CPU instance: a memory balloon plus context-switch thrash
+// that got the box SIGKILLed mid-render (exit 137, Aug 27 2026). Cap it.
+const X264_THREADS = Number(process.env.FRAMECAST_X264_THREADS || 2);
+const X264_PARAMS = 'threads=' + X264_THREADS + ':lookahead-threads=1';
+
+// The kit master exists only to be reframed into the requested formats, all of
+// which are 1080p or smaller. Capturing and encoding it at 4K was 4x the pixel
+// cost for output that gets downscaled anyway. Bound it by AREA, not height, so
+// portrait and landscape masters are both handled sanely.
+const MASTER_MAX_PIXELS = Number(process.env.FRAMECAST_MASTER_MAX_PIXELS || 1920 * 1080);
+
+// Absolute ceiling, applied on EVERY path regardless of preset, tier or caller.
+// Measured: one 3840x2160 capture peaks at ~2.2GB resident (Chromium raster plus
+// x264) which is over this instance's 2GB limit, so 4K cannot be produced here at
+// all. This clamp is the backstop that makes the exit-137 kill structurally
+// impossible even if a future preset, kit format or explicit width/height asks
+// for more. Raise FRAMECAST_HARD_MAX_PIXELS only on an instance with the RAM.
+const HARD_MAX_PIXELS = Number(process.env.FRAMECAST_HARD_MAX_PIXELS || 1920 * 1080);
+
+// Shrink w/h to fit a pixel budget, preserving aspect, keeping both dims even
+// (required by H.264 yuv420p). Returns the pair unchanged when already inside.
+function fitPixels(width, height, budget) {
+  if (!budget || width * height <= budget) return [width, height];
+  const scale = Math.sqrt(budget / (width * height));
+  return [
+    Math.max(2, Math.round((width * scale) / 2) * 2),
+    Math.max(2, Math.round((height * scale) / 2) * 2),
+  ];
+}
+
 // SSRF guard: block the rendered (untrusted) page from reaching internal /
 // cloud-metadata / localhost / private-network addresses. Public hosts are
 // allowed so legitimate artifacts can still load their CDNs/fonts. file:
@@ -104,12 +135,13 @@ function buildFfmpegArgs({ container, fps, width, height, quality, transparent, 
     if (container === 'mp4') {
       return [...common, '-filter_complex', `${fit}[v]`, '-map', '[v]',
         '-c:v', 'libx264', '-preset', q.preset, '-crf', String(q.crf),
-        '-pix_fmt', 'yuv420p', '-movflags', '+faststart', outPath];
+        '-pix_fmt', 'yuv420p', '-movflags', '+faststart',
+        '-x264-params', X264_PARAMS, outPath];
     }
     if (container === 'webm') {
       return [...common, '-filter_complex', `${fit}[v]`, '-map', '[v]',
         '-c:v', 'libvpx-vp9', '-pix_fmt', 'yuv420p', '-b:v', '0', '-crf', String(q.crf + 8),
-        '-row-mt', '1', outPath];
+        '-row-mt', '1', '-threads', String(X264_THREADS), outPath];
     }
     if (container === 'gif') {
       return [...common, '-filter_complex',
@@ -128,6 +160,7 @@ function buildFfmpegArgs({ container, fps, width, height, quality, transparent, 
       '-vf', base,
       '-c:v', 'libx264', '-preset', q.preset, '-crf', String(q.crf),
       '-pix_fmt', 'yuv420p', '-movflags', '+faststart',
+      '-x264-params', X264_PARAMS,
       outPath,
     ];
   }
@@ -138,7 +171,7 @@ function buildFfmpegArgs({ container, fps, width, height, quality, transparent, 
       ...common,
       '-vf', base,
       '-c:v', 'libvpx-vp9', '-pix_fmt', pix, '-b:v', '0', '-crf', String(q.crf + 8),
-      '-row-mt', '1',
+      '-row-mt', '1', '-threads', String(X264_THREADS),
       outPath,
     ];
   }
@@ -325,7 +358,7 @@ async function render(opts) {
   const baseName = isUrl ? 'animation' : path.basename(input).replace(/\.[^.]+$/, '');
   const outputDir = outDir || (isUrl ? process.cwd() : path.dirname(input));
 
-  const browser = await chromium.launch({ args: ['--force-color-profile=srgb', '--disable-lcd-text'] });
+  const browser = await chromium.launch({ args: ['--force-color-profile=srgb', '--disable-lcd-text', '--disable-dev-shm-usage'] });
   const killTimer = setTimeout(() => { try { browser.close(); } catch (_) {} }, MAX_JOB_MS); // hard kill on runaway uploads
   // Probe at a neutral 16:9 viewport first; we'll resize once we know the format.
   const page = await browser.newPage({
@@ -380,6 +413,15 @@ async function render(opts) {
     const scale = opts.maxHeight / height;
     height = opts.maxHeight;
     width = Math.round((width * scale) / 2) * 2;
+  }
+  // Area cap (keeps aspect, even dims). Used by the kit master so a 4K-native
+  // page doesn't get captured and encoded at 4K just to be downscaled after.
+  [width, height] = fitPixels(width, height, opts.maxPixels);
+  // Then the absolute ceiling, which no caller can opt out of.
+  const beforeClamp = width * height;
+  [width, height] = fitPixels(width, height, HARD_MAX_PIXELS);
+  if (width * height < beforeClamp) {
+    console.log(`[framecast] resolution clamped to ${width}x${height} (hard ceiling ${HARD_MAX_PIXELS}px)`);
   }
   const transparent = opts.transparent ?? p.transparent ?? false;
   const watermark = !!opts.watermark;
@@ -643,9 +685,9 @@ function reframeArgs({ masterPath, masterW, masterH, width, height, container, q
     return ['-y', '-i', masterPath, '-filter_complex', `${fit},split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=bayer:bayer_scale=3`, '-r', String(Math.min(fps, 24)), outPath];
   }
   if (container === 'webm') {
-    return ['-y', '-i', masterPath, '-filter_complex', fit, '-r', String(fps), '-c:v', 'libvpx-vp9', '-pix_fmt', 'yuv420p', '-b:v', '0', '-crf', String(q.crf + 8), '-row-mt', '1', outPath];
+    return ['-y', '-i', masterPath, '-filter_complex', fit, '-r', String(fps), '-c:v', 'libvpx-vp9', '-pix_fmt', 'yuv420p', '-b:v', '0', '-crf', String(q.crf + 8), '-row-mt', '1', '-threads', String(X264_THREADS), outPath];
   }
-  return ['-y', '-i', masterPath, '-filter_complex', fit, '-r', String(fps), '-c:v', 'libx264', '-preset', q.preset, '-crf', String(q.crf), '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-x264-params', 'threads=0', outPath];
+  return ['-y', '-i', masterPath, '-filter_complex', fit, '-r', String(fps), '-c:v', 'libx264', '-preset', q.preset, '-crf', String(q.crf), '-pix_fmt', 'yuv420p', '-movflags', '+faststart', '-x264-params', X264_PARAMS, outPath];
 }
 
 // One drop -> every platform. Capture the animation ONCE (the expensive part),
@@ -653,12 +695,22 @@ function reframeArgs({ masterPath, masterW, masterH, width, height, container, q
 async function renderKit(opts) {
   const kitPresets = opts.kitPresets || ['youtube-1080', 'vertical-1080', 'square-1080'];
   const onProgress = opts.onProgress || (() => {});
+  // The master only ever feeds the reframes below, so it never needs more pixels
+  // than the largest format actually asked for (floored at 1080p so a downscale
+  // still has detail to work with). A buyer picking the 4K preset still gets a
+  // 4K-aspect master, just not 4K-sized — every kit output is <=1080p. Rendering
+  // a true 4K master for three 1080p files is what pinned the single CPU and got
+  // the instance SIGKILLed mid-render (exit 137, Aug 27 2026).
+  const kitMaxPixels = Math.max(
+    MASTER_MAX_PIXELS,
+    ...kitPresets.map((id) => (PRESETS[id] ? PRESETS[id].width * PRESETS[id].height : 0)),
+  );
   // 1) master: clean, full-res, native aspect, full duration (the one capture).
   // Encode it near-lossless but FAST ('intermediate'): it's deleted after the
   // reframes, so a slow encode here would be pure waste.
   const master = await render({
     ...opts, preset: opts.preset || 'auto', autoFormat: (opts.preset || 'auto') === 'auto',
-    watermark: false, maxHeight: null, quality: 'intermediate',
+    watermark: false, maxHeight: null, maxPixels: opts.maxPixels || kitMaxPixels, quality: 'intermediate',
   });
   const dir = path.dirname(master.outPath);
   const base = path.basename(master.outPath).replace(/\.[^.]+$/, '');
@@ -690,7 +742,7 @@ async function analyze(opts) {
   const input = opts.input;
   const isUrl = /^https?:\/\//i.test(input);
   const target = isUrl ? input : 'file://' + path.resolve(input);
-  const browser = await chromium.launch({ args: ['--force-color-profile=srgb', '--disable-lcd-text'] });
+  const browser = await chromium.launch({ args: ['--force-color-profile=srgb', '--disable-lcd-text', '--disable-dev-shm-usage'] });
   const killTimer = setTimeout(() => { try { browser.close(); } catch (_) {} }, MAX_JOB_MS); // hard kill on runaway uploads
   try {
     const page = await browser.newPage({ viewport: { width: 1920, height: 1080 }, deviceScaleFactor: 1 });
