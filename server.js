@@ -438,7 +438,7 @@ const server = http.createServer((req, res) => {
   }
 
   if (req.method === 'GET' && url.pathname.startsWith('/files/')) return serveRanged(req, res, path.join(WORK, path.basename(url.pathname)));
-  if (url.pathname === '/healthz') return sendJSON(res, 200, { ok: true, active: queue.active, payments: LIVE ? 'stripe' : 'dev', persist: DATA_DURABLE ? 'disk' : (DATA_OK ? 'ephemeral' : 'memory'), dataDir: DATA });
+  if (url.pathname === '/healthz') return sendJSON(res, 200, { ok: true, active: queue.active, payments: LIVE ? 'stripe' : 'dev', persist: DATA_DURABLE ? 'disk' : (DATA_OK ? 'ephemeral' : 'memory'), dataDir: DATA, build: 'stage-clip-1' });
   // Private funnel dashboard. Hidden unless FRAMECAST_STATS_KEY is set and matches.
   if (req.method === 'GET' && url.pathname === '/api/stats') {
     if (!STATS_KEY || url.searchParams.get('key') !== STATS_KEY) return sendJSON(res, 404, { error: 'Not found' });

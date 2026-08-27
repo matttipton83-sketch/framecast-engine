@@ -267,7 +267,14 @@ function overlayPageFn(arg) {
   var reTC = /\b\d{1,2}:\d{2}\s*\/\s*\d{1,2}:\d{2}\b/;
   // The player bar sits at the bottom of the CONTENT STAGE, not the viewport —
   // measure the band relative to the stage (body rect clamped to the viewport).
+  // The caller can pass arg.stage ({left,top,width,height}) to scope the scan to
+  // a detected content stage — chrome OUTSIDE that rect is excluded by the
+  // render's stage-clip, so it must not be reported (or cropped) here.
   function stageRect() {
+    var o = arg && arg.stage;
+    if (o && o.width > 10 && o.height > 10) {
+      return { left: Math.max(0, o.left), top: Math.max(0, o.top), width: Math.min(W, o.width), height: Math.min(H, o.height) };
+    }
     var r = document.body ? document.body.getBoundingClientRect() : null;
     if (!r || r.width < 10 || r.height < 10) return { left: 0, top: 0, width: W, height: H };
     return { left: Math.max(0, r.left), top: Math.max(0, r.top), width: Math.min(W, r.width), height: Math.min(H, r.height) };
@@ -275,6 +282,10 @@ function overlayPageFn(arg) {
   var S = stageRect();
   var sW = S.width, sH = S.height, sB = S.top + sH, sL = S.left, sR = S.left + sW;
   var bandTop = S.top + sH * 0.72;
+  // With an explicit stage (arg.stage), the export is CLIPPED at the stage's
+  // bottom edge — chrome that starts at/below it can never appear in the export,
+  // so exclude it strictly instead of allowing the usual 4px slack.
+  var maxTop = (arg && arg.stage) ? sB - 2 : sB + 4;
   function inX(r) { return r.left >= sL - 4 && r.right <= sR + 4; }
   function scan() {
     var all = document.body ? document.body.querySelectorAll('*') : [];
@@ -282,11 +293,14 @@ function overlayPageFn(arg) {
     for (var i = 0; i < all.length; i++) {
       var el = all[i]; var r = el.getBoundingClientRect();
       if (r.width < 2 || r.height < 2) continue;
-      if (r.bottom < bandTop || r.top > sB + 4 || !inX(r)) continue;
+      if (r.bottom < bandTop || r.top > maxTop || !inX(r)) continue;
       var t = (el.textContent || '').trim();
       if (!tc && t && t.length <= 30 && reTC.test(t)) tc = el;
       if (!bar && r.width > sW * 0.45 && r.height > 1 && r.height < sH * 0.06) bar = el;
-      if (!play && r.width > 6 && r.height > 6 && r.width < sH * 0.12 && r.height < sH * 0.12 && r.left < sL + sW * 0.33) play = el;
+      // A play glyph is an icon (svg/button), not text. Requiring near-zero text
+      // keeps a word of the creative's own copy (e.g. a bottom tagline) from
+      // being tagged — and later HIDDEN — as player chrome (bug, Aug 27 2026).
+      if (!play && r.width > 6 && r.height > 6 && r.width < sH * 0.12 && r.height < sH * 0.12 && r.left < sL + sW * 0.33 && t.length <= 2) play = el;
     }
     return { tc: tc, bar: bar, play: play };
   }
@@ -302,7 +316,10 @@ function overlayPageFn(arg) {
       st.textContent = '[data-fc-ov-hide]{display:none!important;visibility:hidden!important;opacity:0!important;pointer-events:none!important}';
       (document.head || document.documentElement).appendChild(st);
     }
-    var mark = function () { var ss = scan(); [chromeOf(ss), ss.bar, ss.play, ss.tc].forEach(function (el) { if (el && el.setAttribute) el.setAttribute('data-fc-ov-hide', '1'); }); };
+    // Hide the play candidate only when corroborated by a bar or timecode — a
+    // lone small element in the bottom-left is far more likely to be creative
+    // content than a player button.
+    var mark = function () { var ss = scan(); var list = [chromeOf(ss), ss.bar, ss.tc]; if (ss.tc || ss.bar) list.push(ss.play); list.forEach(function (el) { if (el && el.setAttribute) el.setAttribute('data-fc-ov-hide', '1'); }); };
     mark();
     if (!window.__fc_ov_obs) { try { window.__fc_ov_obs = new MutationObserver(function () { mark(); }); window.__fc_ov_obs.observe(document.body, { childList: true, subtree: true }); } catch (e) {} }
     return { hidden: true };

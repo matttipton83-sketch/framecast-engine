@@ -279,6 +279,57 @@ function stageAspectInPage() {
   return pick.w / pick.h;
 }
 
+// Find the CONTENT STAGE's rectangle on the page (not just its aspect).
+// Fixes the "bundled artifact with a built-in player UI" class (Aug 27 2026,
+// Robb Vela's file): the real scene was an unlabelled <svg> inside a wrapper,
+// exactly 16:9, with player chrome (progress bar, timecode, buttons) laid out
+// BELOW it. Aspect detection measured the wrapper (1.84:1 -> letterboxed) and
+// the export picked up black bars plus the player chrome. removeOverlay then
+// failed in both directions on the same file (left chrome in, hid real copy).
+// Clipping the capture to the detected stage rect fixes both at once: correct
+// aspect AND all chrome excluded, with no DOM surgery.
+//
+// Returned kinds:
+//   'explicit' — #stage / [data-framecast-stage] whose aspect snaps to standard
+//   'media'    — largest svg/canvas/video that dominates the page (>=25% of the
+//                viewport), sits fully in view, and snaps TIGHTLY (2%) to a
+//                standard aspect. Tight on purpose: an authored canvas is exact,
+//                while an incidental wrapper (e.g. 1920x1043 = 1.84:1) is not.
+//   null       — no confident stage; callers keep their previous behavior.
+// Serialized into the page via page.evaluate, so it must stay self-contained.
+function contentStageRectInPage() {
+  var vw = window.innerWidth, vh = window.innerHeight, vArea = vw * vh;
+  var targets = [16 / 9, 1, 9 / 16];
+  function snaps(ar, tol) {
+    for (var i = 0; i < targets.length; i++) { var t = targets[i]; if (Math.abs(ar - t) <= t * tol) return true; }
+    return false;
+  }
+  try {
+    var ex = document.querySelector('#stage, [data-framecast-stage]');
+    if (ex) {
+      var er = ex.getBoundingClientRect();
+      if (er.width > 40 && er.height > 40 && snaps(er.width / er.height, 0.06)) {
+        return { x: er.left, y: er.top, w: er.width, h: er.height, kind: 'explicit' };
+      }
+    }
+  } catch (e) {}
+  var best = null;
+  try {
+    var els = document.querySelectorAll('svg, canvas, video');
+    for (var j = 0; j < els.length; j++) {
+      var r = els[j].getBoundingClientRect();
+      if (r.width < 40 || r.height < 40) continue;
+      var area = r.width * r.height;
+      if (area < vArea * 0.25) continue;                                  // must dominate the page
+      if (r.left < -2 || r.top < -2 || r.right > vw + 2 || r.bottom > vh + 2) continue; // fully in view
+      if (!snaps(r.width / r.height, 0.02)) continue;                     // tight = authored canvas
+      if (!best || area > best.area) best = { area: area, x: r.left, y: r.top, w: r.width, h: r.height };
+    }
+  } catch (e) {}
+  if (best) return { x: best.x, y: best.y, w: best.w, h: best.h, kind: 'media' };
+  return null;
+}
+
 async function analyzeProbe(page, { capSec = 75, loopWindowSec = 150, stepMs = 500, minSec = 3, aspect = 0 } = {}) {
   const empty = { settleSec: 0, loop: { detected: false }, blanks: { blankRanges: [], tornSteps: [] } };
   try {
@@ -393,7 +444,10 @@ async function render(opts) {
 
   // --- format auto-detection: read the animation's natural aspect ratio ---
   if (auto) {
-    const ar = await page.evaluate(stageAspectInPage);
+    // A confidently-detected content stage is the truest aspect signal (its box
+    // IS the authored canvas); fall back to the letterbox heuristic otherwise.
+    const sr = await page.evaluate(contentStageRectInPage).catch(() => null);
+    const ar = (sr && sr.w > 0 && sr.h > 0) ? sr.w / sr.h : await page.evaluate(stageAspectInPage);
     // map measured aspect ratio to the closest standard preset
     const candidates = [
       { id: 'youtube-1080', r: 16 / 9 },
@@ -492,6 +546,19 @@ async function render(opts) {
         durationSec = probe.settleSec; // motion-settle fallback (previous behavior)
         durSource = 'settle';
       }
+      // Settle keys on the LAST frame change — which can be the transition INTO
+      // a trailing blank (e.g. a looping ad's restart wipe, then empty). If the
+      // scan shows the clip literally ends blank, don't render the blank tail.
+      if (durSource === 'settle' && probe.blanks && Array.isArray(probe.blanks.blankRanges)) {
+        for (const [bs, be] of probe.blanks.blankRanges) {
+          if (bs > 3 && bs < durationSec && be >= durationSec) {
+            console.log(`[framecast] settle trimmed ${durationSec}s -> ${bs}s (trailing blank ${bs}-${be}s)`);
+            durationSec = bs;
+            durSource = 'settle-trim';
+            break;
+          }
+        }
+      }
       clockDirty = true; // the probe advanced the virtual clock + animation state
     }
   }
@@ -545,28 +612,81 @@ async function render(opts) {
   // Guarded to a fixed stage whose aspect snaps to a standard target AND that
   // differs in size from the viewport, so responsive pages are never touched.
   let capW = width, capH = height;
+  let stageClip = null; // set when the capture is clipped to a detected media stage
   if (!cropBottom) {
     try {
-      const box = await page.evaluate(() => {
-        const b = document.body;
-        if (!b) return null;
-        const stageEl = document.querySelector('#stage, [data-framecast-stage]');
-        if (stageEl) { const r = stageEl.getBoundingClientRect(); return { w: r.width, h: r.height }; }
-        // offsetWidth/Height report a fixed-size body at its layout size, even
-        // when the viewport is larger or smaller (unlike window.innerWidth).
-        return { w: b.offsetWidth, h: b.offsetHeight };
-      });
-      if (box && box.w > 40 && box.h > 40) {
-        const ar = box.w / box.h;
-        const snapsToStandard = [16 / 9, 1, 9 / 16].some((t) => Math.abs(ar - t) <= t * 0.06);
-        const differs = Math.abs(box.w - width) > width * 0.015 || Math.abs(box.h - height) > height * 0.015;
-        if (snapsToStandard && differs) {
-          capW = Math.max(2, Math.round(box.w / 2) * 2);
-          capH = Math.max(2, Math.round(box.h / 2) * 2);
-          await page.setViewportSize({ width: capW, height: capH });
+      const sr = await page.evaluate(contentStageRectInPage).catch(() => null);
+      if (sr && sr.kind === 'media') {
+        // --- media-stage clip (svg/canvas/video scene inside page chrome) ----
+        // Upsize the viewport so the stage lands at (or near) the output
+        // resolution — chrome margins are treated as fixed pixels (measured as
+        // viewport minus stage, then refined by re-measuring) — and CLIP the
+        // capture to the stage rect. Player chrome falls outside the clip, so
+        // no DOM surgery (removeOverlay) is needed for this class at all.
+        const budget = Math.min(width * height, HARD_MAX_PIXELS);
+        let rect = sr;
+        for (let pass = 0; pass < 2 && rect; pass++) {
+          const vp = page.viewportSize() || { width, height };
+          const mx = vp.width - rect.w, my = vp.height - rect.h;
+          const scale = Math.sqrt(budget / (rect.w * rect.h));
+          let tw = Math.max(2, Math.round((rect.w * scale) / 2) * 2);
+          let th = Math.max(2, Math.round((rect.h * scale) / 2) * 2);
+          let nvw = Math.max(2, Math.round(tw + mx)), nvh = Math.max(2, Math.round(th + my));
+          if (nvw * nvh > HARD_MAX_PIXELS * 2) { // viewport safety ceiling (huge chrome margins)
+            const s2 = Math.sqrt((HARD_MAX_PIXELS * 2) / (nvw * nvh));
+            tw = Math.max(2, Math.round((tw * s2) / 2) * 2);
+            th = Math.max(2, Math.round((th * s2) / 2) * 2);
+            nvw = Math.max(2, Math.round(tw + mx)); nvh = Math.max(2, Math.round(th + my));
+          }
+          if (Math.abs(nvw - vp.width) < 2 && Math.abs(nvh - vp.height) < 2) break; // already sized
+          await page.setViewportSize({ width: nvw, height: nvh });
           await page.waitForTimeout(80);
-          const mode = Math.abs((capW / capH) - (width / height)) < 0.01 ? 'scale' : 'fit';
-          console.log(`[framecast] stage-fit: capturing native ${capW}x${capH} -> ${mode} to ${width}x${height}`);
+          const r2 = await page.evaluate(contentStageRectInPage).catch(() => null);
+          if (!r2 || r2.kind !== 'media') { rect = null; break; } // stage vanished on resize — bail
+          rect = r2;
+          if (Math.abs(rect.w - tw) <= tw * 0.02 && Math.abs(rect.h - th) <= th * 0.02) break;
+        }
+        if (rect) {
+          const vp = page.viewportSize() || { width, height };
+          const cx = Math.max(0, Math.floor(rect.x)), cy = Math.max(0, Math.floor(rect.y));
+          let cw = Math.max(2, Math.floor(rect.w / 2) * 2), ch = Math.max(2, Math.floor(rect.h / 2) * 2);
+          if (cx + cw > vp.width) cw = Math.max(2, Math.floor((vp.width - cx) / 2) * 2);
+          if (cy + ch > vp.height) ch = Math.max(2, Math.floor((vp.height - cy) / 2) * 2);
+          if (cw > 40 && ch > 40) {
+            capW = cw; capH = ch;
+            if (cx > 0 || cy > 0 || cw < vp.width - 2 || ch < vp.height - 2) {
+              stageClip = { x: cx, y: cy, width: cw, height: ch };
+              const mode = Math.abs((capW / capH) - (width / height)) < 0.01 ? 'scale' : 'fit';
+              console.log(`[framecast] stage-clip: media stage ${cw}x${ch}@(${cx},${cy}) in ${vp.width}x${vp.height} -> ${mode} to ${width}x${height}`);
+            }
+            // full-bleed media stage: nothing to clip; capW/capH track the viewport.
+          }
+        }
+      } else {
+        // --- fixed-size stage fit (previous behavior, unchanged) -------------
+        const box = (sr && sr.kind === 'explicit')
+          ? { w: sr.w, h: sr.h }
+          : await page.evaluate(() => {
+              const b = document.body;
+              if (!b) return null;
+              const stageEl = document.querySelector('#stage, [data-framecast-stage]');
+              if (stageEl) { const r = stageEl.getBoundingClientRect(); return { w: r.width, h: r.height }; }
+              // offsetWidth/Height report a fixed-size body at its layout size, even
+              // when the viewport is larger or smaller (unlike window.innerWidth).
+              return { w: b.offsetWidth, h: b.offsetHeight };
+            });
+        if (box && box.w > 40 && box.h > 40) {
+          const ar = box.w / box.h;
+          const snapsToStandard = [16 / 9, 1, 9 / 16].some((t) => Math.abs(ar - t) <= t * 0.06);
+          const differs = Math.abs(box.w - width) > width * 0.015 || Math.abs(box.h - height) > height * 0.015;
+          if (snapsToStandard && differs) {
+            capW = Math.max(2, Math.round(box.w / 2) * 2);
+            capH = Math.max(2, Math.round(box.h / 2) * 2);
+            await page.setViewportSize({ width: capW, height: capH });
+            await page.waitForTimeout(80);
+            const mode = Math.abs((capW / capH) - (width / height)) < 0.01 ? 'scale' : 'fit';
+            console.log(`[framecast] stage-fit: capturing native ${capW}x${capH} -> ${mode} to ${width}x${height}`);
+          }
         }
       }
     } catch (_) {}
@@ -590,13 +710,21 @@ async function render(opts) {
   //  • SVG/canvas/dynamic bars (vision tie-break) -> can't be hidden, so crop the
   //    bottom strip via the capture clip; the existing scale upsizes it back to
   //    full size (uniform zoom, no distortion).
-  let grabClip = { x: 0, y: 0, width: capW, height: capH };
+  let grabClip = stageClip || { x: 0, y: 0, width: capW, height: capH };
   if (cropBottom) {
+    // (stage-clip is skipped entirely when cropBottom is set, so these never mix)
     const cw = Math.max(2, Math.round(capW * (1 - cropBottom) / 2) * 2);
     const ch = Math.max(2, Math.round(capH * (1 - cropBottom) / 2) * 2);
     grabClip = { x: Math.round((capW - cw) / 2), y: 0, width: cw, height: ch };
   } else if (opts.removeOverlay) {
-    try { await page.evaluate(overlayPageFn, { mode: 'hide' }); } catch (_) {}
+    if (stageClip) {
+      // The player chrome sits OUTSIDE the detected stage and is excluded by the
+      // clip. DOM-hiding here is redundant and has hidden REAL creative content
+      // before (Aug 27 2026: it took out a tagline while leaving chrome in). Skip.
+      console.log('[framecast] removeOverlay skipped: stage-clip already excludes page chrome');
+    } else {
+      try { await page.evaluate(overlayPageFn, { mode: 'hide' }); } catch (_) {}
+    }
   }
 
   // Capture via the raw DevTools protocol — skips Playwright's per-screenshot
@@ -758,7 +886,10 @@ async function analyze(opts) {
     await waitForReady(page); // mount gate — measure the real animation, not a placeholder
 
     // --- aspect ratio -> nearest standard preset (same logic as render's auto) ---
-    const aspectRatio = await page.evaluate(stageAspectInPage);
+    const stageRect = await page.evaluate(contentStageRectInPage).catch(() => null);
+    const aspectRatio = (stageRect && stageRect.w > 0 && stageRect.h > 0)
+      ? stageRect.w / stageRect.h
+      : await page.evaluate(stageAspectInPage);
     const cands = [{ id: 'youtube-1080', r: 16 / 9 }, { id: 'square-1080', r: 1 }, { id: 'vertical-1080', r: 9 / 16 }];
     const preset = cands.sort((a, b) => Math.abs(a.r - aspectRatio) - Math.abs(b.r - aspectRatio))[0].id;
     const P = PRESETS[preset];
@@ -783,6 +914,13 @@ async function analyze(opts) {
       loop = probe.loop; blanks = probe.blanks;
       if (probe.loop && probe.loop.detected && probe.loop.confidence >= 0.6) { durationSec = Math.min(HARD_CAP_SEC, Math.max(1, probe.loop.periodSec)); durSource = 'loop'; }
       else if (probe.settleSec > 0) { durationSec = probe.settleSec; durSource = 'settle'; }
+      // Same trailing-blank trim as render(): don't report a duration that ends
+      // on a literally-blank tail (see the settle-trim note there).
+      if (durSource === 'settle' && blanks && Array.isArray(blanks.blankRanges)) {
+        for (const [bs, be] of blanks.blankRanges) {
+          if (bs > 3 && bs < durationSec && be >= durationSec) { durationSec = bs; durSource = 'settle-trim'; break; }
+        }
+      }
     }
     if (!durationSec) { durationSec = 15; durSource = 'default'; }
     durationSec = Math.min(durationSec, HARD_CAP_SEC);
@@ -807,9 +945,21 @@ async function analyze(opts) {
       const midMs = Math.max(1500, Math.min(durationSec * 1000 * 0.4, durationSec * 1000 - 300));
       await page.evaluate((tt) => { try { window.__framecast.tick(tt); window.__framecast.seekDeclarative(tt); } catch (e) {} }, midMs);
       await page.waitForTimeout(60);
-      overlay = await page.evaluate(overlayPageFn, { mode: 'detect' });
+      // When a media stage is detected, scope overlay detection to the STAGE:
+      // chrome laid out below the stage is excluded by the render's stage-clip,
+      // so reporting it (and offering cropBottom for it) would double-crop real
+      // content. The DOM scan gets the stage rect; the vision frame is clipped
+      // to the stage so it sees exactly what the export will contain.
+      const sr2 = await page.evaluate(contentStageRectInPage).catch(() => null);
+      const stageArg = (sr2 && sr2.kind === 'media')
+        ? { left: sr2.x, top: sr2.y, width: sr2.w, height: sr2.h } : null;
+      overlay = await page.evaluate(overlayPageFn, { mode: 'detect', stage: stageArg });
       if (!overlay.detected) {
-        const frame = await page.screenshot({ type: 'jpeg', quality: 70 });
+        const visClip = stageArg ? { clip: {
+          x: Math.max(0, Math.floor(sr2.x)), y: Math.max(0, Math.floor(sr2.y)),
+          width: Math.max(2, Math.floor(sr2.w)), height: Math.max(2, Math.floor(sr2.h)),
+        } } : {};
+        const frame = await page.screenshot({ type: 'jpeg', quality: 70, ...visClip });
         const v = (await visionDetectOverlay(frame)) || {};
         overlay.vision = { status: v.status, conf: v.confidence }; // lightweight ops signal
         if (v.present && v.confidence >= 0.5) {
@@ -819,7 +969,7 @@ async function analyze(opts) {
       }
     } catch (e) { overlay.vision = { status: 'exception' }; }
 
-    return { preset, label: P.label, width: P.width, height: P.height, aspectRatio: +aspectRatio.toFixed(4), durationSec, durSource, loop, blanks, overlay, info };
+    return { preset, label: P.label, width: P.width, height: P.height, aspectRatio: +aspectRatio.toFixed(4), durationSec, durSource, loop, blanks, overlay, info, stage: stageRect ? stageRect.kind : null };
   } finally {
     clearTimeout(killTimer);
     try { await browser.close(); } catch (_) {}
@@ -870,4 +1020,4 @@ async function visionDetectOverlay(jpegBuffer) {
   } catch (e) { return { present: false, status: 'error', note: String((e && e.message) || e).slice(0, 160) }; }
 }
 
-module.exports = { render, renderKit, analyze, visionDetectOverlay, PRESETS, QUALITY, HARD_CAP_SEC, lastChangeIndex, settleDurationSec };
+module.exports = { render, renderKit, analyze, visionDetectOverlay, PRESETS, QUALITY, HARD_CAP_SEC, lastChangeIndex, settleDurationSec, contentStageRectInPage };
